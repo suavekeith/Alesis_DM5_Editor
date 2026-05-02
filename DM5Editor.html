@@ -1,0 +1,1343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Alesis DM5 Editor</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --accent:#e85c0d;--accent-dim:rgba(232,92,13,0.13);--accent-glow:rgba(232,92,13,0.28);
+  --bg:#0c0908;--panel:#131110;--panel2:#1b1917;--panel3:#232120;
+  --border:#2a2724;--border2:#383430;
+  --text:#cdc7be;--text-dim:#5e5850;--text-mid:#948c82;
+  --lcd-bg:#0b1709;--lcd-text:#8ff860;--lcd-dim:#3a6e28;
+  --led-on:#3ddc84;--led-err:#ff4444;--led-warn:#ffcc44;
+  --pad-h:58px;
+}
+.t-phosphor{--accent:#39ff6a;--accent-dim:rgba(57,255,106,0.13);--accent-glow:rgba(57,255,106,0.28);}
+.t-cobalt{--accent:#00aaff;--accent-dim:rgba(0,170,255,0.13);--accent-glow:rgba(0,170,255,0.28);}
+.t-compact{--pad-h:46px;}
+
+html,body,#root{height:100%;overflow:hidden;}
+body{background:var(--bg);color:var(--text);font-family:'Rajdhani',sans-serif;font-size:13px;}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:5px;height:5px;}
+::-webkit-scrollbar-track{background:var(--panel);}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+
+/* ── LAYOUT ── */
+.app{display:flex;flex-direction:column;height:100%;background:var(--bg);}
+.main-area{display:flex;flex:1;overflow:hidden;gap:0;}
+
+/* ── HEADER ── */
+.header{
+  display:flex;align-items:center;gap:0;
+  background:var(--panel);border-bottom:1px solid var(--border);
+  height:58px;padding:0 16px;flex-shrink:0;
+  box-shadow:0 2px 12px rgba(0,0,0,0.5);
+  position:relative;z-index:10;
+}
+.hdr-logo{
+  font-family:'Orbitron',monospace;font-weight:900;font-size:20px;
+  color:var(--accent);letter-spacing:0.12em;
+  text-shadow:0 0 18px var(--accent-glow);
+  margin-right:4px;white-space:nowrap;
+}
+.hdr-sub{font-family:'Orbitron',monospace;font-weight:400;font-size:9px;color:var(--text-dim);letter-spacing:0.2em;display:block;margin-top:2px;}
+.hdr-sep{width:1px;background:var(--border2);height:36px;margin:0 16px;flex-shrink:0;}
+
+/* LCD display */
+.lcd{
+  background:var(--lcd-bg);border:1px solid #1e3a18;border-radius:3px;
+  padding:6px 14px;display:flex;flex-direction:column;align-items:center;
+  box-shadow:inset 0 1px 4px rgba(0,0,0,0.6),0 0 10px rgba(50,180,30,0.08);
+  min-width:220px;
+}
+.lcd-slot{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--lcd-dim);letter-spacing:0.1em;margin-bottom:2px;}
+.lcd-name{
+  font-family:'Share Tech Mono',monospace;font-size:20px;color:var(--lcd-text);
+  letter-spacing:0.06em;line-height:1;
+  text-shadow:0 0 8px rgba(100,255,80,0.4);
+}
+.lcd-name input{
+  background:transparent;border:none;outline:none;
+  font-family:'Share Tech Mono',monospace;font-size:20px;color:var(--lcd-text);
+  letter-spacing:0.06em;width:180px;text-align:center;
+  text-shadow:0 0 8px rgba(100,255,80,0.4);
+}
+
+/* MIDI status */
+.midi-status{display:flex;align-items:center;gap:8px;margin-left:auto;}
+.status-led{width:10px;height:10px;border-radius:50%;background:var(--led-err);flex-shrink:0;
+  box-shadow:0 0 6px currentColor;}
+.status-led.ok{background:var(--led-on);color:var(--led-on);}
+.status-led.warn{background:var(--led-warn);color:var(--led-warn);}
+.status-text{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-mid);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+/* ── TOOLBAR ── */
+.toolbar{
+  display:flex;align-items:center;gap:6px;padding:6px 14px;flex-shrink:0;
+  background:var(--panel2);border-bottom:1px solid var(--border);flex-wrap:wrap;
+}
+.toolbar select{
+  background:var(--panel3);color:var(--text);border:1px solid var(--border2);
+  font-family:'Share Tech Mono',monospace;font-size:11px;padding:4px 6px;border-radius:2px;
+  outline:none;cursor:pointer;max-width:170px;
+}
+.tlbl{font-size:10px;color:var(--text-dim);font-family:'Rajdhani',sans-serif;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;}
+.tsep{width:1px;height:20px;background:var(--border2);margin:0 4px;flex-shrink:0;}
+.progress-bar{flex:1;height:3px;background:var(--panel3);border-radius:2px;overflow:hidden;min-width:60px;max-width:120px;}
+.progress-fill{height:100%;background:var(--accent);border-radius:2px;transition:width 0.2s;}
+
+/* ── BUTTONS ── */
+.btn{
+  background:var(--panel3);color:var(--text);border:1px solid var(--border2);
+  padding:5px 11px;cursor:pointer;border-radius:2px;
+  font-family:'Rajdhani',sans-serif;font-weight:600;font-size:12px;letter-spacing:0.05em;
+  text-transform:uppercase;white-space:nowrap;
+  transition:background 0.1s,border-color 0.1s,box-shadow 0.1s;
+  box-shadow:0 1px 3px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.btn:hover{background:var(--panel);border-color:var(--accent);color:var(--accent);}
+.btn:active{box-shadow:inset 0 1px 4px rgba(0,0,0,0.5);transform:translateY(1px);}
+.btn:disabled{opacity:0.3;cursor:default;pointer-events:none;}
+.btn-accent{background:var(--accent-dim);border-color:var(--accent);color:var(--accent);}
+.btn-accent:hover{background:var(--accent);color:#fff;}
+.btn-sm{padding:3px 8px;font-size:11px;}
+
+/* ── KIT BROWSER ── */
+.kit-browser{
+  width:188px;flex-shrink:0;display:flex;flex-direction:column;
+  background:var(--panel);border-right:1px solid var(--border);overflow:hidden;
+}
+.panel-title{
+  padding:8px 12px;font-size:10px;font-weight:700;letter-spacing:0.15em;
+  text-transform:uppercase;color:var(--text-dim);background:var(--panel2);
+  border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.kit-list{flex:1;overflow-y:auto;}
+.kit-row{
+  display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;
+  border-bottom:1px solid var(--border);transition:background 0.1s;
+}
+.kit-row:hover{background:var(--panel2);}
+.kit-row.active{background:var(--accent-dim);border-left:2px solid var(--accent);}
+.kit-row.active .kit-num{color:var(--accent);}
+.kit-num{font-family:'Share Tech Mono',monospace;font-size:11px;color:#fff;width:18px;flex-shrink:0;}
+.kit-name-text{font-size:12px;font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.kit-dot{width:6px;height:6px;border-radius:50%;background:var(--border2);flex-shrink:0;}
+.kit-dot.loaded{background:var(--led-on);box-shadow:0 0 4px var(--led-on);}
+
+/* ── PAD GRID ── */
+.pad-area{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg);}
+.bank-tabs{
+  display:flex;gap:0;padding:8px 12px 0;flex-shrink:0;border-bottom:1px solid var(--border);
+  background:var(--panel);overflow-x:auto;
+}
+.bank-tab{
+  padding:5px 10px;font-size:11px;font-weight:600;letter-spacing:0.04em;cursor:pointer;
+  border-radius:2px 2px 0 0;border:1px solid transparent;border-bottom:none;
+  margin-right:2px;color:var(--text-dim);transition:all 0.1s;white-space:nowrap;
+  font-family:'Rajdhani',sans-serif;text-transform:uppercase;
+}
+.bank-tab:hover{color:var(--text);background:var(--panel2);}
+.bank-tab.active{color:#fff;border-color:var(--border2);background:var(--bg);}
+.pad-grid{
+  flex:1;overflow-y:auto;padding:12px;
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));
+  gap:5px;align-content:start;
+}
+.pad{
+  height:var(--pad-h);background:var(--panel);border:1px solid var(--border);
+  border-radius:2px;cursor:pointer;padding:5px 6px;
+  display:flex;flex-direction:column;justify-content:space-between;
+  position:relative;overflow:hidden;
+  transition:background 0.08s,border-color 0.08s,box-shadow 0.08s;
+  box-shadow:0 1px 3px rgba(0,0,0,0.4);
+}
+.pad::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:var(--bank-color,#444);opacity:0.85;
+}
+.pad:hover{background:var(--panel2);border-color:var(--border2);}
+.pad.selected{
+  background:var(--accent-dim);border-color:var(--accent);
+  box-shadow:0 0 10px var(--accent-glow),0 1px 3px rgba(0,0,0,0.4);
+}
+.pad-top{display:flex;justify-content:space-between;align-items:flex-start;padding-left:6px;}
+.pad-num{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--text-dim);}
+.pad-bank-lbl{font-size:9px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--bank-color,#888);}
+.pad-sound-name{font-size:10px;font-weight:500;color:var(--text-mid);padding-left:6px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2;}
+.pad-vol-bar{height:2px;background:var(--border);margin:0 6px 0 9px;border-radius:1px;overflow:hidden;}
+.pad-vol-fill{height:100%;background:var(--bank-color,#555);opacity:0.5;}
+
+/* ── PAD EDITOR ── */
+.pad-editor{
+  width:0;flex-shrink:0;overflow:hidden;
+  transition:width 0.2s ease;
+  background:var(--panel);border-left:1px solid var(--border);
+  display:flex;flex-direction:column;
+}
+.pad-editor.open{width:284px;}
+.editor-inner{width:284px;display:flex;flex-direction:column;height:100%;overflow-y:auto;padding:0;}
+.editor-header{
+  padding:10px 14px;background:var(--panel2);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
+}
+.editor-title{font-family:'Orbitron',monospace;font-size:12px;font-weight:700;color:var(--accent);letter-spacing:0.1em;}
+.editor-body{padding:12px 14px;display:flex;flex-direction:column;gap:12px;flex:1;}
+
+/* Editor field */
+.ef{display:flex;flex-direction:column;gap:4px;}
+.ef-label{font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-dim);}
+.ef select,.ef input[type=text],.ef input[type=number]{
+  background:var(--panel2);color:var(--text);border:1px solid var(--border2);
+  font-family:'Share Tech Mono',monospace;font-size:12px;padding:5px 8px;border-radius:2px;
+  outline:none;width:100%;
+}
+.ef select:focus,.ef input:focus{border-color:var(--accent);}
+
+/* Sliders */
+.slider-row{display:flex;align-items:center;gap:8px;}
+.slider-row input[type=range]{
+  flex:1;-webkit-appearance:none;height:3px;border-radius:2px;
+  background:var(--panel3);outline:none;cursor:pointer;
+}
+.slider-row input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+  background:var(--accent);cursor:pointer;box-shadow:0 0 5px var(--accent-glow);
+  border:2px solid var(--panel);
+}
+.slider-val{font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--accent);width:30px;text-align:right;flex-shrink:0;}
+.pan-track{flex:1;position:relative;height:3px;background:var(--panel3);border-radius:2px;}
+.pan-center{position:absolute;left:50%;top:-3px;width:1px;height:9px;background:var(--border2);}
+.pan-labels{display:flex;justify-content:space-between;font-size:9px;color:var(--text-dim);font-family:'Share Tech Mono',monospace;}
+
+/* Radio group */
+.radio-group{display:flex;gap:3px;}
+.radio-btn{
+  flex:1;text-align:center;padding:4px 6px;cursor:pointer;
+  background:var(--panel2);border:1px solid var(--border2);border-radius:2px;
+  font-size:11px;font-weight:600;letter-spacing:0.04em;color:var(--text-dim);
+  transition:all 0.1s;
+}
+.radio-btn.active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent);}
+.radio-btn:hover:not(.active){border-color:var(--border2);color:var(--text);}
+
+/* Editor actions */
+.editor-actions{
+  padding:10px 14px;border-top:1px solid var(--border);background:var(--panel2);
+  display:flex;flex-direction:column;gap:6px;flex-shrink:0;
+}
+.auto-send-row{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim);}
+.auto-send-row input{cursor:pointer;accent-color:var(--accent);}
+
+/* ── LOG ── */
+.log-panel{
+  flex-shrink:0;background:var(--panel);border-top:1px solid var(--border);
+  display:flex;flex-direction:column;overflow:hidden;
+  transition:height 0.2s;
+}
+.log-panel.open{height:90px;}
+.log-panel.closed{height:28px;}
+.log-header{
+  display:flex;align-items:center;gap:8px;padding:4px 12px;
+  background:var(--panel2);border-bottom:1px solid var(--border);
+  cursor:pointer;flex-shrink:0;height:28px;
+}
+.log-title{font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-dim);}
+.log-body{flex:1;overflow-y:auto;padding:4px 10px;font-family:'Share Tech Mono',monospace;font-size:11px;}
+.log-line{padding:1px 0;border-bottom:1px solid rgba(255,255,255,0.03);}
+.log-line.ok{color:#5dd67a;}
+.log-line.err{color:#ff6666;}
+.log-line.info{color:#6699ff;}
+.log-caret{margin-left:auto;font-size:10px;color:var(--text-dim);}
+
+/* ── TWEAKS PANEL ── */
+.tweaks-float{
+  position:fixed;bottom:80px;right:16px;z-index:100;
+  background:var(--panel2);border:1px solid var(--border2);border-radius:4px;
+  box-shadow:0 4px 24px rgba(0,0,0,0.6);padding:14px;width:200px;
+  display:none;
+}
+.tweaks-float.visible{display:block;}
+.tweaks-section{margin-bottom:12px;}
+.tweaks-label{font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-dim);margin-bottom:6px;}
+.tweaks-opts{display:flex;flex-wrap:wrap;gap:4px;}
+.tweaks-opt{
+  padding:4px 9px;font-size:11px;font-weight:600;cursor:pointer;border-radius:2px;
+  background:var(--panel3);border:1px solid var(--border2);color:var(--text-dim);
+}
+.tweaks-opt.active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent);}
+
+/* ── SCREEN TABS ── */
+.screen-tabs{
+  display:flex;gap:0;padding:0 14px;flex-shrink:0;
+  background:var(--panel2);border-bottom:2px solid var(--border);
+}
+.screen-tab{
+  padding:8px 20px;font-size:11px;font-weight:700;letter-spacing:0.12em;
+  text-transform:uppercase;font-family:'Orbitron',monospace;cursor:pointer;
+  color:var(--text-dim);border-bottom:2px solid transparent;margin-bottom:-2px;
+  transition:all 0.1s;
+}
+.screen-tab:hover{color:var(--text);}
+.screen-tab.active{color:var(--accent);border-bottom-color:var(--accent);}
+
+/* ── TRIGGERS SCREEN ── */
+.triggers-page{flex:1;display:flex;overflow:hidden;}
+
+.trig-drummap{
+  width:230px;flex-shrink:0;background:var(--panel);
+  border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;
+}
+.trig-drummap-body{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:6px;}
+.trig-section-hdr{
+  font-size:9px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;
+  color:var(--text-dim);padding:6px 0 2px;border-top:1px solid var(--border);margin-top:4px;
+}
+.trig-section-hdr:first-child{border-top:none;margin-top:0;padding-top:0;}
+.trig-note-row{display:flex;align-items:center;gap:6px;}
+.trig-note-lbl{
+  font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--text-mid);
+  flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.trig-note-input{
+  background:var(--panel2);color:var(--text);border:1px solid var(--border2);
+  font-family:'Share Tech Mono',monospace;font-size:12px;
+  padding:3px 6px;border-radius:2px;outline:none;width:52px;text-align:center;
+}
+.trig-note-input:focus{border-color:var(--accent);}
+
+.trig-setup-area{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg);}
+.trig-setup-toolbar{
+  display:flex;align-items:center;gap:8px;padding:8px 14px;
+  background:var(--panel2);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;
+}
+.trig-card-grid{
+  flex:1;overflow-y:auto;padding:12px;
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));
+  gap:8px;align-content:start;
+}
+.trig-card{
+  background:var(--panel);border:1px solid var(--border);border-radius:3px;
+  padding:10px 12px;display:flex;flex-direction:column;gap:7px;
+}
+.trig-card-title{
+  font-family:'Orbitron',monospace;font-size:11px;font-weight:700;color:var(--accent);
+  letter-spacing:0.1em;padding-bottom:6px;border-bottom:1px solid var(--border);
+}
+.trig-row{display:flex;flex-direction:column;gap:2px;}
+.trig-row-lbl{font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-dim);}
+.trig-slider-row{display:flex;align-items:center;gap:6px;}
+.trig-slider-row input[type=range]{
+  flex:1;-webkit-appearance:none;height:3px;border-radius:2px;
+  background:var(--panel3);outline:none;cursor:pointer;
+}
+.trig-slider-row input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:12px;height:12px;border-radius:50%;
+  background:var(--accent);cursor:pointer;
+  box-shadow:0 0 4px var(--accent-glow);border:2px solid var(--panel);
+}
+.trig-val{
+  font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--accent);
+  width:26px;text-align:right;flex-shrink:0;
+}
+.trig-vcurve-sel{
+  background:var(--panel2);color:var(--text);border:1px solid var(--border2);
+  font-family:'Share Tech Mono',monospace;font-size:11px;
+  padding:3px 6px;border-radius:2px;outline:none;width:100%;
+}
+.trig-vcurve-sel:focus{border-color:var(--accent);}
+.trig-empty{
+  flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;
+  gap:14px;color:var(--text-dim);font-family:'Share Tech Mono',monospace;font-size:13px;
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- CONSTANTS (no Babel needed) -->
+<script>
+const DEVICE_ID = 0x13;
+const BANKS = ["Kik","Snr","Tom","Hat","Cym","Prc","Efx","Rnd"];
+const BANK_COLORS = ["#ff5050","#ff8840","#ffd040","#44ee88","#44aaff","#aa66ff","#ff44cc","#44ffee"];
+
+const VOICES = {
+  Kik:["Arena","Producer","Pwr Rock","Fat Head","Dark Fat","Passion","Holo","WarmKick","SpeedMtl","Plastine","Back Mic","FrontMic","Lite","RubbrBtr","Simple","Basic","Slammin'","Foot","Bch Ball","LowSolid","Feels Gd","Pillow","Fusion","Reggae","Kinetica","Brt Ambi","Hi Gate","Med Room","Lrg Room","Forum","Punchy","InTheKik","Big One","Bonk","RockClub","MyTribe","RoundAmb","RoundAtk","HardAttk","Blitz","9oh9Kik1","9oh9Kik2","9oh9Kik3","Native","AnaKick","Mangler","SuprRave","Spud","Rap Wave","Beat Box","WeR Borg","Indscpln","SonarWav","60Cycles","Motor","Stages","Cybrwave","Cybo","BrainEtr","Squish","Crunch","Thump","CrnchHed","CrnchFlp","Pwr Down","Hardware","JunkDrwr","Junk Man","LooseLug","Carpet","Smoke","Aggresor","BadBreth","King","Xpando","Deep IIx","Dry IIx","Hex Kick","Fat Boy","Techtik","Skool","KidStuff","Scratchr","Afro","Cuban","Tribal","Steak","Hazey","Koosh","Bowels","Obergeil","HiEnergy","Undrwrld","Cruiser","Plumbing"],
+  Snr:["Get Real","Big Rim","Woodclif","Hip Hop","Heartlnd","PwrBalld","Session","Funky","Choked","Crome","ChromRng","ChromeHi","Beauty","Piccolo","Fat Picc","Hi Ambi","MicroPic","PiccRoom","Low Picc","NicePicc","Gun Picc","Dyn Picc","Velo>Rim","Tiny E","Crisp","Clean","Cadence","DryShell","TopBrass","UltraThn","Kamko","Hawaii","BluSprkl","Bronze","Hard Rim","Vintage","Weasel","WetWeasl","Has Edge","WithClap","Raunchy","DeepRoom","SlapRoom","WarmRoom","AnaKick","LongTail","ExtraLrg","Big Hall","BigPlate","Compresd","Solar","Far Away","Postmdrn","Loose","Grinder","Freaky","Woody","ThinSkin","Crank It","Snareo","TightLug","Ibid","Beefrank","SlowFunk","Low Ring","FreakRim","MetlHarm","Groovy","Splat","RatlWood","Trashier","8oh8 Snr","8oh8 Rim","8oh8 Tin","Krafty","MetlPipe","9oh9 Snr","9oh9 Rim","Release","City","U Bahn","Gritty","Fat Grit","Rank","BrikHaus","Overtone","DingoBoy","Wonk","HexSnare","IIxSnare","70'sFunk","Ol Skool","Stutter","ThikGate","MetalGat","Face Beat","Thrasher","Shred","Pipe Bomb","Clanker","Blast","Assault","Speck","Spectral","OrchRoom","OrchHall","OrchRoll","BrushFat","BrushThn","BrushRim","Jazz Hit","Stik>Snr","DryStick","LiveStik","DeepStik","StikRoom","AmbiStik"],
+  Tom:["Hero Hi","Hero Mid","Hero Low","Hero Flr","Open Hi","Open Mid","Open Low","PinstrpH","PinstrpM","PinstrpL","StudioHi","StudioMd","StudioLo","Big O Hi","Big O Lo","Girth Hi","Girth Lo","InsideHi","InsideMd","InsideLo","Jazz Hi","Jazz Low","Hall Hi","Hall Mid","Hall Low","Hall Flr","Psilo Hi","PsiloMid","PsiloLow","PsiloFlr","CannonHi","CannonMd","CannonLo","CannonFl","CanFlngH","CanFlngM","CanFlngL","Ballo Hi","BalloLow","MakRakHi","MakRakMd","MakRakLo","MakRakFl","Omega Hi","Omega Md","Omega Lo","Omega Fl","Salvo Hi","Salvo Md","Salvo Lo","Hex Hi","Hex Mid","Hex Low","HexFloor","ClascHex","Noise Hi","Noise Lo","Exo Hi","Exo Mid","Exo Low","OilCanHi","OilCanLo","8oh8 Hi","8oh8 Mid","8oh8 Low","Bit TomH","Bit TomL","BombTomH","BombTomM","BombTomL","Mad Roto"],
+  Hat:["BrtTite1","BrtTite2","Brt Clsd","Brt Half","BrtLoose","BrtLoosr","DynBrt 1","DynBrt 2","Brt Open","Brt Foot","SR Clsd","SR Half","SR Open","LiteClsd","Lite Dyn","LiteHalf","LiteOpen","FlngClsd","FlngHalf","FlngOpen","Rok Clsd","RokLoose","RokSlosh","Rok Open","Rok Foot","8oh8Clsd","8oh8Open","Rap Clsd","Rap Half","Rap Open","Zip Clsd","Zip Open","Zap Clsd","Zap Open"],
+  Cym:["Ride Cym","VeloRide","PingRide","Exotic","RideBell","TransBel","El Bell","Avantia","CymParts","BrtCrash","Ster Brt","DrkCrash","SterDark","LR Crsh1","LR Crsh2","IceCrash","ZootMute","DrtyMute","Splash","MicroCym","8 Splash","China","SterChna","Woo Han","Doppler","TipShank","SterPhaz","Hammered","EastWest","Orch Cym","8oh8Crsh","8CrashFl","Syn Pang","SynCrash","BlastCym","Noiz Cym"],
+  Prc:["Agogo Hi","Agogo Lo","AgoPitch","Noggin","Reco Hi","Reco Lo","Clay Pot","Triangle","Tri Mute","TriPitch","DrumStix","Cowbell","Tambrine","TamPitch","Sleighbl","Snowjob","Cabasa","SharpShk","TikTak","Maracas","ShakerHi","ShakerLo","Bead Pot","BeadShk1","BeadShk2","BeadShk3","SynShkr1","SynShkr2","SynShkrD","Rattle","CrashrHd","CrashrSf","Rainshak","RainStik","Gravel","RatlBwap","Bongo Hi","BngHiSlp","Bongo Lo","BngLoSlp","Conga Hi","Conga Lo","CongaSlp","Slap Dyn","Cuica Hi","Cuica Lo","AmIndian","Tatonka","WarPaint","BoLanGoo","BoLanDyn","BreketaH","BreketaL","BrktaDyn","Elephant","GhatamHi","GhatamLo","Udu","Ethnika","Amazon","Nagara","Oobla Hi","Oobla Lo","OoblaDyn","Paah","Ethno","EasternV","TalkngHi","TalkngLo","HandDrum","Tavil Hi","Tavil Lo","Monastic","Tavasa","Tabla","TblaDyn1","TblaDyn2","Ghatabla","Tablchrd","Haji","TimbleHi","TimbleLo","8cwPitch","8oh8 Cow","8oh8 Rim","CongaRap","8oh8Clap","9oh9Clap","Big Clap","LiteSnap","ClscSnap","Pwr Snap","Clave","ClveKord","Castanet","CastRoll","CastDyn1","CastDyn2","Wood Hi","Wood Lo","Block Hi","Block Lo","TempleHi","TempleLo","Vibrslap","Oil Can","OilPitch","MetalTik","Plucky","PopCheek","Rappotab","I'm Clay","BigoBrek","SpacePrc"],
+  Efx:["Anvil","BallPeen","BattyBel","4 Star","Blksmith","Clank","Tank Hit","SunBurst","Industry","Big Shot","Metal","WhtNoiz1","WhtNoiz2","Spectre1","Spectre2","Tesla","Machine","PinkZap1","PinkZap2","PnkBlst1","PnkBlst2","Zap 1","Zap 2","Zap 3","Wood Zap","Dyn Zap","Dual Zap","Residue","WhipCrak","Kung Fu","WhipNoiz","Vinyl 1","Vinyl 2","DynVinyl","PwrGtrHi","PwrGtrLo","Gtr Hit","FlngGtrH","FlngGtrL","Guitrbot","Slippery","Danger!","Screech","FlScreeH","FlScreeL","Mercury","Technoid","Bucket","Grab Bag","Alloys 1","Alloys 2","Velopede","Static","Pole","Froggy","Sun City","InduHit","JetBeads","Plonk","Klonk","Pop","Knock","Metronom","Silence"],
+  Rnd:["BrtHatC1","BrtHatC2","RokHatCl","Real Snr","LooseSnr","TinSnare","ValleySn","FreakSnr","Aliens","Zapalog","Blasters","Metalize","ShknBake","Triblism","CngoBngo","RagaBabl"]
+};
+
+function voiceName(bankIdx, soundIdx) {
+  const list = VOICES[BANKS[bankIdx]];
+  return list && list[soundIdx] ? list[soundIdx] : '#' + soundIdx;
+}
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+function noteName(n) {
+  n = Math.max(0, Math.min(127, n));
+  return NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 1);
+}
+function calcChecksum(msg) { let s=0; for(let i=7;i<=340;i++) s+=msg[i]; return s&0x7F; }
+function verifyChecksum(msg) { return msg[341]===calcChecksum(msg); }
+function decodeKit(msg) {
+  const k={name:"",rootNote:0,fswClose:0,fswHeld:0,trigNotes:[],pads:[]};
+  for(let i=0;i<14;i++) k.name+=String.fromCharCode(msg[7+i]);
+  k.rootNote=msg[21]; k.fswClose=msg[22]; k.fswHeld=msg[23];
+  for(let i=0;i<12;i++) k.trigNotes.push(msg[24+i]);
+  for(let i=0;i<61;i++){
+    const b=36+i*5;
+    const volume=msg[b],pan=(msg[b+1]>>4)&7,output=(msg[b+1]>>3)&1,bank=msg[b+1]&7;
+    const sound=msg[b+2],fine=msg[b+3],group=(msg[b+4]>>3)&3;
+    const cRaw=msg[b+4]&7,coarse=cRaw>=4?cRaw-8:cRaw;
+    k.pads.push({volume,pan,output,bank,sound,fine,coarse,group});
+  }
+  return k;
+}
+function buildKitSysEx(kitData,kitIndex){
+  const opcode=0x20+kitIndex;
+  const data=[0xF0,0x00,0x00,0x0E,DEVICE_ID,0x7F,opcode];
+  const name=kitData.name.padEnd(14," ").substring(0,14);
+  for(let i=0;i<14;i++) data.push(name.charCodeAt(i)&0x7F);
+  data.push(kitData.rootNote&0x7F,kitData.fswClose&0x7F,kitData.fswHeld&0x7F);
+  for(let i=0;i<12;i++) data.push((kitData.trigNotes[i]||0)&0x7F);
+  for(const p of kitData.pads){
+    const b1=((p.pan&7)<<4)|((p.output&1)<<3)|(p.bank&7);
+    const cRaw=p.coarse>=0?p.coarse:p.coarse+8;
+    const b4=((p.group&3)<<3)|(cRaw&7);
+    data.push(p.volume&0x7F,b1,p.sound&0x7F,p.fine&0x7F,b4);
+  }
+  let sum=0; for(let i=7;i<data.length;i++) sum+=data[i];
+  data.push(sum&0x7F,0xF7);
+  return data;
+}
+
+// Trigger Setup (Message 5, 69 bytes)
+function decodeTrigSetup(msg) {
+  const t={gains:[],vcurves:[],xtalks:[],noises:[],decays:[]};
+  for(let i=0;i<12;i++) t.gains.push(msg[7+i]);
+  for(let i=0;i<12;i++){
+    const b=19+i*4;
+    t.vcurves.push(msg[b]);t.xtalks.push(msg[b+1]);
+    t.noises.push(msg[b+2]);t.decays.push(msg[b+3]);
+  }
+  return t;
+}
+function buildTrigSetupSysEx(ts){
+  const data=[0xF0,0x00,0x00,0x0E,DEVICE_ID,0x7F,0x05];
+  for(let i=0;i<12;i++) data.push(ts.gains[i]&0x7F);
+  for(let i=0;i<12;i++){
+    data.push(ts.vcurves[i]&0x7F,ts.xtalks[i]&0x7F,ts.noises[i]&0x7F,ts.decays[i]&0x7F);
+  }
+  let sum=0; for(let i=7;i<data.length;i++) sum+=data[i];
+  data.push(sum&0x7F,0xF7);
+  return data;
+}
+const DEFAULT_TRIG_SETUP={
+  gains:  Array(12).fill(50),
+  vcurves:Array(12).fill(2),
+  xtalks: Array(12).fill(0),
+  noises: Array(12).fill(0),
+  decays: Array(12).fill(50)
+};
+const VCURVE_NAMES=["Linear","Exp 1","Exp 2","Exp 3","Log 1","Log 2","Log 3","Dynamic"];
+const TRIG_NAMES=["Bass Drum","Snare","Hi Tom","Mid Tom","Low Tom","Floor Tom",
+                  "Hi-Hat","Crash 1","Ride","Crash 2","Aux 1","Aux 2"];
+</script>
+
+<script type="text/babel">
+
+const { useState, useEffect, useRef, useCallback } = React;
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "theme": "phosphor",
+  "padSize": "normal",
+  "showLog": true
+}/*EDITMODE-END*/;
+
+function App() {
+  // ── STATE ──
+  const [theme, setTheme] = useState(TWEAK_DEFAULTS.theme);
+  const [padSize, setPadSize] = useState(TWEAK_DEFAULTS.padSize);
+  const [showLog, setShowLog] = useState(TWEAK_DEFAULTS.showLog);
+  const [showTweaks, setShowTweaks] = useState(false);
+
+  const [midiStatus, setMidiStatus] = useState({ ok: false, warn: false, text: 'OFFLINE' });
+  const [inputPorts, setInputPorts] = useState([]);
+  const [outputPorts, setOutputPorts] = useState([]);
+  const [selectedInId, setSelectedInId] = useState('');
+  const [selectedOutId, setSelectedOutId] = useState('');
+
+  const [library, setLibrary] = useState(Array(21).fill(null));
+  const [kit, setKit] = useState(null);
+  const [activeKitIdx, setActiveKitIdx] = useState(null);
+  const [bankFilter, setBankFilter] = useState(-1); // -1 = all
+
+  const [selectedPad, setSelectedPad] = useState(null);
+  const [copiedPad, setCopiedPad] = useState(null);
+  const [autoSend, setAutoSend] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [isSending, setIsSending] = useState(false);
+  const [sendProgress, setSendProgress] = useState(0);
+  const [logOpen, setLogOpen] = useState(true);
+
+  // program change on kit select
+  const [autoPC, setAutoPC] = useState(true);
+  const [midiCh, setMidiCh] = useState(9); // 0-indexed; 9 = ch 10 (DM5 default)
+
+  // screen navigation
+  const [screen, setScreen] = useState('kits'); // 'kits' | 'triggers'
+
+  // trigger setup
+  const [trigSetup, setTrigSetup] = useState(null);
+  const [ts, setTs] = useState(JSON.parse(JSON.stringify(DEFAULT_TRIG_SETUP)));
+
+  // editor fields
+  const [ev, setEv] = useState({ bank: 0, sound: 0, volume: 99, pan: 3, output: 0, group: 0, coarse: 0, fine: 0 });
+
+  // refs for MIDI callbacks
+  const midiAccessRef = useRef(null);
+  const midiOutRef = useRef(null);
+  const midiInRef = useRef(null);
+  const libraryRef = useRef(Array(21).fill(null));
+  const kitRef = useRef(null);
+  const sysexBufRef = useRef([]); // accumulates fragmented SysEx
+
+  useEffect(() => {libraryRef.current = library;}, [library]);
+  useEffect(() => {kitRef.current = kit;}, [kit]);
+
+  // ── LOG ──
+  const addLog = useCallback((text, cls = 'ok') => {
+    setLogs((prev) => [...prev.slice(-149), { text, cls, id: Date.now() + Math.random() }]);
+  }, []);
+
+  // ── MIDI ──
+  const processSysEx = useCallback((msg) => {
+    const hex = (b) => b.toString(16).padStart(2,'0').toUpperCase();
+    if (msg.length === 343) {
+      const op = msg[6];
+      if (op >= 0x20 && op <= 0x34) {
+        const idx = op - 0x20;
+        if (!verifyChecksum(msg)) {addLog(`Kit ${idx}: checksum error (got ${hex(msg[341])} exp ${hex(calcChecksum(msg))})`, 'err');return;}
+        const decoded = decodeKit(msg);
+        setLibrary((prev) => {const n=[...prev];n[idx]=decoded;libraryRef.current=n;return n;});
+        addLog(`Received kit ${idx}: "${decoded.name.trim()}"`, 'ok');
+        return;
+      }
+    }
+    if (msg.length === 69 && msg[6] === 0x05) {
+      const decoded = decodeTrigSetup(msg);
+      setTrigSetup(decoded);
+      setTs(JSON.parse(JSON.stringify(decoded)));
+      addLog('Received trigger setup.', 'ok');
+      return;
+    }
+    const head = msg.slice(0,Math.min(10,msg.length)).map(hex).join(' ');
+    addLog(`SysEx ${msg.length}b: ${head}…`, 'info');
+  }, [addLog]);
+
+  const handleMIDI = useCallback((e) => {
+    const bytes = Array.from(e.data);
+    if (!bytes.length) return;
+    if (bytes[0] < 0x80) {
+      if (sysexBufRef.current.length > 0) sysexBufRef.current.push(...bytes);
+    } else if (bytes[0] === 0xF0) {
+      sysexBufRef.current = [...bytes];
+    } else if (bytes[0] === 0xF7) {
+      if (sysexBufRef.current.length > 0) sysexBufRef.current.push(0xF7);
+    } else if (bytes[0] < 0xF0) {
+      sysexBufRef.current = [];
+      return;
+    } else {
+      return;
+    }
+    const buf = sysexBufRef.current;
+    if (buf.length > 0 && buf[buf.length - 1] === 0xF7) {
+      const complete = [...buf];
+      sysexBufRef.current = [];
+      processSysEx(complete);
+    }
+  }, [processSysEx]);
+
+  // Stable ref so openPorts always dispatches to the latest handleMIDI
+  const handleMIDIRef = useRef(null);
+  useEffect(() => { handleMIDIRef.current = handleMIDI; }, [handleMIDI]);
+
+  const openPorts = useCallback((access, inId, outId) => {
+    if (!access) return;
+    if (midiInRef.current) midiInRef.current.onmidimessage = null;
+    const inp = inId ? access.inputs.get(inId) : null;
+    const out = outId ? access.outputs.get(outId) : null;
+    midiInRef.current = inp;midiOutRef.current = out;
+    if (inp) inp.onmidimessage = (e) => handleMIDIRef.current?.(e);
+    const ok = !!(inp && out);
+    setMidiStatus({
+      ok, warn: !!(inId || outId) && !ok,
+      text: ok ? inp.name.substring(0, 24) : inId || outId ? 'PARTIAL' : 'NO PORTS'
+    });
+    if (ok) addLog(`Ports: in="${inp.name}" out="${out.name}"`, 'info');
+  }, [addLog]);
+
+  const populatePorts = useCallback((access) => {
+    const ins = [],outs = [];
+    access.inputs.forEach((p) => ins.push({ id: p.id, name: p.name }));
+    access.outputs.forEach((p) => outs.push({ id: p.id, name: p.name }));
+    setInputPorts(ins);setOutputPorts(outs);
+  }, []);
+
+  const initMIDI = async () => {
+    try {
+      const access = await navigator.requestMIDIAccess({ sysex: true });
+      midiAccessRef.current = access;
+      populatePorts(access);
+      access.onstatechange = () => populatePorts(access);
+      setMidiStatus({ ok: false, warn: true, text: 'SELECT PORTS' });
+      addLog('MIDI ready — select ports.', 'info');
+    } catch (e) {
+      addLog('MIDI failed: ' + e, 'err');
+      setMidiStatus({ ok: false, warn: false, text: 'MIDI FAILED' });
+    }
+  };
+
+  const handleInChange = (id) => {
+    setSelectedInId(id);
+    openPorts(midiAccessRef.current, id, selectedOutId);
+  };
+  const handleOutChange = (id) => {
+    setSelectedOutId(id);
+    openPorts(midiAccessRef.current, selectedInId, id);
+  };
+
+  const requestKit = (i) => {
+    if (!midiOutRef.current) {addLog('No MIDI output.', 'err');return;}
+    const op = 0x40 | (0x20 + i);
+    const msg = [0xF0, 0x00, 0x00, 0x0E, DEVICE_ID, 0x7F, op, 0xF7];
+    addLog(`→ REQ kit ${i} [${msg.map(b=>b.toString(16).padStart(2,'0').toUpperCase()).join(' ')}]`, 'info');
+    midiOutRef.current.send(msg);
+  };
+
+  const requestAllKits = async () => {
+    if (!midiOutRef.current) {addLog('No MIDI output.', 'err');return;}
+    sysexBufRef.current = [];
+    addLog('Requesting all 21 drumsets…', 'info');
+    setIsSending(true);
+    for (let i = 0; i <= 20; i++) {
+      if (!midiOutRef.current) break;
+      requestKit(i);
+      setSendProgress(Math.round((i + 1) / 21 * 100));
+      if (i < 20) await new Promise((r) => setTimeout(r, 300));
+    }
+    setIsSending(false);setSendProgress(0);
+    addLog('All kit requests sent.', 'info');
+  };
+
+  const sendNRPN = (lsb, value, maxVal) => {
+    if (!midiOutRef.current) return;
+    const v = Math.round(Math.max(0, Math.min(value, maxVal)) * 127 / maxVal);
+    midiOutRef.current.send([0xB9, 99, 0x00]);
+    midiOutRef.current.send([0xB9, 98, lsb]);
+    midiOutRef.current.send([0xB9, 6, v]);
+  };
+  const pushNRPN = (p) => {
+    sendNRPN(0x08, p.bank, 7);sendNRPN(0x09, p.sound, 99);
+    sendNRPN(0x0C, p.volume, 99);sendNRPN(0x0D, p.pan, 6);
+    sendNRPN(0x0E, p.output, 1);sendNRPN(0x0F, p.group, 3);
+  };
+
+  const sendKitData = (k, idx) => {
+    if (!midiOutRef.current || !k) return;
+    const data = buildKitSysEx(k, idx);
+    if (data.length !== 343) {addLog(`Build error: ${data.length}b`, 'err');return;}
+    midiOutRef.current.send(data);
+    addLog(`Sent kit ${idx}: "${k.name.trim()}"`, 'ok');
+  };
+
+  const sendKit = () => {
+    if (activeKitIdx === null) {addLog('No kit selected.', 'err');return;}
+    sendKitData(kitRef.current, activeKitIdx);
+  };
+
+  const sendAllKits = async () => {
+    if (!midiOutRef.current) {addLog('No MIDI output.', 'err');return;}
+    const toSend = libraryRef.current.map((k, i) => ({ k, i })).filter(({ k }) => k !== null);
+    if (!toSend.length) {addLog('No kits loaded.', 'err');return;}
+    setIsSending(true);
+    for (let n = 0; n < toSend.length; n++) {
+      const { k, i } = toSend[n];
+      sendKitData(k, i);
+      setSendProgress(Math.round((n + 1) / toSend.length * 100));
+      if (n < toSend.length - 1) await new Promise((r) => setTimeout(r, 400));
+    }
+    setIsSending(false);setSendProgress(0);
+    addLog('All kits sent.', 'ok');
+  };
+
+  // ── KIT MANAGEMENT ──
+  const loadKit = (idx) => {
+    const k = libraryRef.current[idx];
+    if (!k) return;
+    const copy = JSON.parse(JSON.stringify(k));
+    setKit(copy);kitRef.current = copy;
+    setActiveKitIdx(idx);setSelectedPad(null);
+    if (autoPC && midiOutRef.current) {
+      midiOutRef.current.send([0xC0 | midiCh, idx]);
+      addLog(`Kit ${idx}: "${copy.name.trim()}" + PC→ch${midiCh + 1}`, 'info');
+    } else {
+      addLog(`Loaded kit ${idx}: "${copy.name.trim()}"`, 'info');
+    }
+  };
+
+  const updateKitName = (name) => {
+    if (!kitRef.current) return;
+    const padded = name.padEnd(14, ' ').substring(0, 14);
+    const updated = { ...kitRef.current, name: padded };
+    setKit(updated);kitRef.current = updated;
+    setLibrary((prev) => {const n = [...prev];if (activeKitIdx !== null) n[activeKitIdx] = { ...updated };return n;});
+  };
+
+  // ── PAD EDITOR ──
+  const selectPad = (i) => {
+    setSelectedPad(i);
+    if (!kitRef.current) return;
+    const p = kitRef.current.pads[i];
+    setEv({ ...p });
+    pushNRPN(p);
+  };
+
+  const updateEv = (key, val) => {
+    setEv((prev) => {
+      const next = { ...prev, [key]: val };
+      if (key === 'bank') next.sound = 0;
+      pushNRPN(next);
+      return next;
+    });
+  };
+
+  const applyPad = () => {
+    if (selectedPad === null || !kitRef.current) {addLog('No pad selected.', 'err');return;}
+    const newPads = [...kitRef.current.pads];
+    newPads[selectedPad] = { ...ev };
+    const updated = { ...kitRef.current, pads: newPads };
+    setKit(updated);kitRef.current = updated;
+    if (activeKitIdx !== null)
+    setLibrary((prev) => {const n = [...prev];n[activeKitIdx] = updated;return n;});
+    addLog(`Pad ${selectedPad} updated.`, 'info');
+    if (autoSend) sendKitData(updated, activeKitIdx);
+  };
+
+  const previewPad = () => {
+    if (selectedPad === null) {addLog('No pad selected.', 'err');return;}
+    if (!midiOutRef.current) {addLog('No MIDI output.', 'err');return;}
+    pushNRPN(ev);
+    const note = (kitRef.current?.rootNote || 36) + selectedPad & 0x7F;
+    midiOutRef.current.send([0x99, note, 100]);
+    setTimeout(() => midiOutRef.current?.send([0x89, note, 0]), 200);
+    addLog(`Preview pad ${selectedPad} → note ${note}`, 'info');
+  };
+
+  const copyPad = () => {
+    if (selectedPad === null || !kit) return;
+    setCopiedPad({ ...kit.pads[selectedPad] });
+    addLog(`Copied pad ${selectedPad}`, 'info');
+  };
+
+  const pastePad = () => {
+    if (!copiedPad || selectedPad === null || !kitRef.current) return;
+    const newPads = [...kitRef.current.pads];
+    newPads[selectedPad] = { ...copiedPad };
+    const updated = { ...kitRef.current, pads: newPads };
+    setKit(updated);kitRef.current = updated;
+    setEv({ ...copiedPad });
+    if (activeKitIdx !== null) setLibrary((prev) => {const n = [...prev];n[activeKitIdx] = updated;return n;});
+    addLog(`Pasted to pad ${selectedPad}`, 'info');
+  };
+
+  // ── EXPORT / IMPORT ──
+  const exportJSON = async () => {
+    const loaded = library.filter(Boolean);
+    if (!loaded.length) {addLog('No kits to export.', 'err');return;}
+    const json = JSON.stringify({ version: 1, kits: library }, null, 2);
+    if (window.electronAPI) {
+      const r = await window.electronAPI.saveFile({ defaultName: 'dm5-kits.json', content: json });
+      if (r.success) addLog(`Saved: ${r.path}`, 'ok');
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+      a.download = 'dm5-kits.json';a.click();
+      addLog(`Exported ${loaded.length} kits`, 'ok');
+    }
+  };
+
+  const importJSON = async () => {
+    if (window.electronAPI) {
+      const r = await window.electronAPI.openFile();
+      if (r.success) applyImport(r.content);
+    } else {
+      const inp = document.createElement('input');
+      inp.type = 'file';inp.accept = '.json';
+      inp.onchange = (e) => {const reader = new FileReader();reader.onload = (ev) => applyImport(ev.target.result);reader.readAsText(e.target.files[0]);};
+      inp.click();
+    }
+  };
+
+  const applyImport = (json) => {
+    try {
+      const data = JSON.parse(json);
+      const kits = Array.isArray(data) ? data : data.kits;
+      let count = 0;
+      const newLib = [...Array(21).fill(null)];
+      kits.forEach((k, i) => {if (k && i <= 20) {newLib[i] = k;count++;}});
+      setLibrary(newLib);libraryRef.current = newLib;
+      addLog(`Imported ${count} kits.`, 'ok');
+    } catch (e) {addLog('Import failed: ' + e.message, 'err');}
+  };
+
+  // ── TRIGGER SETUP ──
+  const requestTrigSetup = () => {
+    if (!midiOutRef.current) {addLog('No MIDI output.', 'err');return;}
+    midiOutRef.current.send([0xF0, 0x00, 0x00, 0x0E, DEVICE_ID, 0x7F, 0x45, 0xF7]);
+    addLog('Requested trigger setup.', 'info');
+  };
+
+  const sendTrigSetupData = () => {
+    if (!midiOutRef.current) {addLog('No MIDI output.', 'err');return;}
+    const data = buildTrigSetupSysEx(ts);
+    if (data.length !== 69) {addLog(`Trig build error: ${data.length}b`, 'err');return;}
+    midiOutRef.current.send(data);
+    setTrigSetup(JSON.parse(JSON.stringify(ts)));
+    addLog('Sent trigger setup.', 'ok');
+  };
+
+  const updateTs = (field, idx, val) => {
+    setTs((prev) => {
+      const next = {...prev, [field]: [...prev[field]]};
+      next[field][idx] = val;
+      return next;
+    });
+  };
+
+  const resetTs = () => {
+    setTs(trigSetup
+      ? JSON.parse(JSON.stringify(trigSetup))
+      : JSON.parse(JSON.stringify(DEFAULT_TRIG_SETUP)));
+  };
+
+  // ── KIT DRUM MAP ──
+  const updateTrigNote = (idx, val) => {
+    if (!kitRef.current) return;
+    const newNotes = [...kitRef.current.trigNotes];
+    newNotes[idx] = Math.max(0, Math.min(127, parseInt(val) || 0));
+    const updated = {...kitRef.current, trigNotes: newNotes};
+    setKit(updated);kitRef.current = updated;
+    if (activeKitIdx !== null)
+      setLibrary((prev) => {const n=[...prev];n[activeKitIdx]=updated;return n;});
+  };
+
+  const updateRootNote = (val) => {
+    if (!kitRef.current) return;
+    const updated = {...kitRef.current, rootNote: Math.max(0, Math.min(127, parseInt(val) || 0))};
+    setKit(updated);kitRef.current = updated;
+    if (activeKitIdx !== null)
+      setLibrary((prev) => {const n=[...prev];n[activeKitIdx]=updated;return n;});
+  };
+
+  const updateFswNote = (key, val) => {
+    if (!kitRef.current) return;
+    const updated = {...kitRef.current, [key]: Math.max(0, Math.min(127, parseInt(val) || 0))};
+    setKit(updated);kitRef.current = updated;
+    if (activeKitIdx !== null)
+      setLibrary((prev) => {const n=[...prev];n[activeKitIdx]=updated;return n;});
+  };
+
+  // ── TWEAKS PROTOCOL ──
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.data?.type === '__activate_edit_mode') setShowTweaks(true);
+      if (e.data?.type === '__deactivate_edit_mode') setShowTweaks(false);
+    };
+    window.addEventListener('message', handler);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', handler);
+  }, []);
+
+  const setTweak = (key, val) => {
+    if (key === 'theme') setTheme(val);
+    if (key === 'padSize') setPadSize(val);
+    if (key === 'showLog') setShowLog(val);
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { [key]: val } }, '*');
+  };
+
+  // ── SOUNDS for current editor bank ──
+  const bankVoices = VOICES[BANKS[ev.bank]] || [];
+
+  // ── FILTERED PADS ──
+  const filteredPads = kit ? kit.pads.map((p, i) => ({ ...p, idx: i })).filter((p) => bankFilter < 0 || p.bank === bankFilter) : [];
+
+  // ── RENDER ──
+  const ledClass = midiStatus.ok ? 'ok' : midiStatus.warn ? 'warn' : '';
+
+  return (
+    <div className={`app t-${theme}${padSize === 'compact' ? ' t-compact' : ''}`}>
+
+      {/* HEADER */}
+      <header className="header">
+        <div>
+          <span className="hdr-logo">DM5</span>
+          <span className="hdr-sub">ALESIS DRUM EDITOR</span>
+        </div>
+        <div className="hdr-sep"></div>
+        <div className="lcd">
+          <div className="lcd-slot">
+            {activeKitIdx !== null ? `KIT ${String(activeKitIdx).padStart(2, '0')}` : 'NO KIT'}
+          </div>
+          <div className="lcd-name">
+            {kit ?
+            <input
+              value={kit.name.trim()}
+              maxLength={14}
+              onChange={(e) => updateKitName(e.target.value)}
+              spellCheck={false} /> :
+
+            <span style={{ color: 'var(--lcd-dim)', fontSize: '14px' }}>— NO KIT LOADED —</span>
+            }
+          </div>
+        </div>
+        <div className="hdr-sep"></div>
+        <div className="midi-status">
+          <div className={`status-led ${ledClass}`}></div>
+          <div className="status-text">{midiStatus.text}</div>
+        </div>
+      </header>
+
+      {/* TOOLBAR */}
+      <div className="toolbar">
+        <button className="btn btn-accent" onClick={initMIDI}>INIT MIDI</button>
+        <span className="tlbl">IN</span>
+        <select value={selectedInId} onChange={(e) => handleInChange(e.target.value)}>
+          <option value="">— select —</option>
+          {inputPorts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <span className="tlbl">OUT</span>
+        <select value={selectedOutId} onChange={(e) => handleOutChange(e.target.value)}>
+          <option value="">— select —</option>
+          {outputPorts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <button className="btn" onClick={requestAllKits}>REQ ALL</button>
+        <button className="btn btn-sm" onClick={() => requestKit(0)} title="Request kit 0 only — check log for response">REQ 0</button>
+        <div className="tsep"></div>
+        <button className="btn" onClick={sendKit} disabled={!kit}>SEND KIT</button>
+        <button className="btn" onClick={sendAllKits} disabled={isSending}>SEND ALL</button>
+        {isSending && <div className="progress-bar"><div className="progress-fill" style={{ width: sendProgress + '%' }}></div></div>}
+        <div className="tsep"></div>
+        <button className="btn btn-sm" onClick={exportJSON}>EXPORT</button>
+        <button className="btn btn-sm" onClick={importJSON}>IMPORT</button>
+      </div>
+
+      {/* SCREEN TABS */}
+      <div className="screen-tabs">
+        <div className={`screen-tab${screen==='kits'?' active':''}`} onClick={()=>setScreen('kits')}>KITS</div>
+        <div className={`screen-tab${screen==='triggers'?' active':''}`} onClick={()=>setScreen('triggers')}>TRIGGERS</div>
+      </div>
+
+      {/* MAIN */}
+      <div className="main-area" style={{display: screen==='kits' ? 'flex' : 'none'}}>
+
+        {/* KIT BROWSER */}
+        <div className="kit-browser">
+          <div className="panel-title" style={{display:'flex',alignItems:'center',gap:'6px'}}>
+            <span style={{flex:1}}>Kit Library</span>
+            <label style={{display:'flex',alignItems:'center',gap:'4px',fontWeight:400,letterSpacing:0,textTransform:'none',fontSize:'10px',cursor:'pointer'}}
+              title="Send Program Change when selecting a kit">
+              <input type="checkbox" checked={autoPC} onChange={e=>setAutoPC(e.target.checked)}
+                style={{accentColor:'var(--accent)',cursor:'pointer'}} />
+              PC
+            </label>
+            <select value={midiCh}
+              onChange={e=>setMidiCh(parseInt(e.target.value))}
+              title="MIDI channel for Program Change"
+              style={{background:'var(--panel3)',color:'var(--text-dim)',border:'1px solid var(--border2)',
+                fontFamily:"'Share Tech Mono',monospace",fontSize:'10px',padding:'1px 3px',borderRadius:'2px',
+                outline:'none',cursor:'pointer'}}>
+              {Array.from({length:16},(_,i)=>
+                <option key={i} value={i}>ch{i+1}</option>
+              )}
+            </select>
+          </div>
+          <div className="kit-list">
+            {Array.from({ length: 21 }, (_, i) => {
+              const k = library[i];
+              return (
+                <div
+                  key={i}
+                  className={`kit-row${activeKitIdx === i ? ' active' : ''}`}
+                  onClick={() => k && loadKit(i)}
+                  style={{ opacity: k ? 1 : 0.45, cursor: k ? 'pointer' : 'default' }}>
+                  
+                  <span className="kit-num" style={{ color: "rgb(255, 255, 255)" }}>{String(i).padStart(2, '0')}</span>
+                  <span className="kit-name-text">{k ? k.name.trim() : '—'}</span>
+                  <div className={`kit-dot ${k ? 'loaded' : ''}`}></div>
+                </div>);
+
+            })}
+          </div>
+        </div>
+
+        {/* PAD GRID */}
+        <div className="pad-area">
+          <div className="bank-tabs">
+            <div className={`bank-tab${bankFilter === -1 ? ' active' : ''}`} onClick={() => setBankFilter(-1)}>ALL</div>
+            {BANKS.map((b, i) =>
+            <div
+              key={b}
+              className={`bank-tab${bankFilter === i ? ' active' : ''}`}
+              style={bankFilter === i ? { borderColor: BANK_COLORS[i], color: BANK_COLORS[i] } : {}}
+              onClick={() => setBankFilter(bankFilter === i ? -1 : i)}>
+              {b}</div>
+            )}
+          </div>
+          <div className="pad-grid">
+            {kit ? filteredPads.map((p) => {
+              const bc = BANK_COLORS[p.bank] || '#666';
+              const sn = voiceName(p.bank, p.sound);
+              return (
+                <div
+                  key={p.idx}
+                  className={`pad${selectedPad === p.idx ? ' selected' : ''}`}
+                  style={{ '--bank-color': bc }}
+                  onClick={() => selectPad(p.idx)}>
+                  
+                  <div className="pad-top">
+                    <span className="pad-num">{noteName((kit.rootNote + p.idx) & 0x7F)}</span>
+                    <span className="pad-bank-lbl">{BANKS[p.bank]}</span>
+                  </div>
+                  <div className="pad-sound-name">{sn}</div>
+                  <div className="pad-vol-bar">
+                    <div className="pad-vol-fill" style={{ width: Math.round(p.volume / 99 * 100) + '%' }}></div>
+                  </div>
+                </div>);
+
+            }) :
+            <div style={{ gridColumn: '1/-1', padding: '32px', color: 'var(--text-dim)', textAlign: 'center', fontFamily: "'Share Tech Mono',monospace", fontSize: '13px' }}>
+                ← SELECT A KIT FROM THE BROWSER TO BEGIN
+              </div>
+            }
+          </div>
+        </div>
+
+        {/* PAD EDITOR */}
+        <div className={`pad-editor${selectedPad !== null ? ' open' : ''}`}>
+          <div className="editor-inner">
+            <div className="editor-header">
+              <span className="editor-title">
+                {selectedPad !== null && kit
+                  ? `${noteName((kit.rootNote + selectedPad) & 0x7F)} · ${(kit.rootNote + selectedPad) & 0x7F}`
+                  : '— —'}
+              </span>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <button className="btn btn-sm" onClick={copyPad}>COPY</button>
+                <button className="btn btn-sm" onClick={pastePad} disabled={!copiedPad}>PASTE</button>
+              </div>
+            </div>
+            <div className="editor-body">
+              {/* Bank */}
+              <div className="ef">
+                <div className="ef-label">Bank</div>
+                <select value={ev.bank} onChange={(e) => updateEv('bank', parseInt(e.target.value))}
+                style={{ borderLeftColor: BANK_COLORS[ev.bank], borderLeftWidth: '3px' }}>
+                  {BANKS.map((b, i) => <option key={i} value={i}>{b}</option>)}
+                </select>
+              </div>
+              {/* Sound */}
+              <div className="ef">
+                <div className="ef-label">Sound</div>
+                <select value={ev.sound} onChange={(e) => updateEv('sound', parseInt(e.target.value))}>
+                  {Array.from({ length: 128 }, (_, i) =>
+                  <option key={i} value={i}>{i} — {bankVoices[i] || '—'}</option>
+                  )}
+                </select>
+              </div>
+              {/* Volume */}
+              <div className="ef">
+                <div className="ef-label">Volume</div>
+                <div className="slider-row">
+                  <input type="range" min="0" max="99" value={ev.volume}
+                  onChange={(e) => updateEv('volume', parseInt(e.target.value))} />
+                  <span className="slider-val">{ev.volume}</span>
+                </div>
+              </div>
+              {/* Pan */}
+              <div className="ef">
+                <div className="ef-label">Pan</div>
+                <div className="slider-row">
+                  <input type="range" min="0" max="6" value={ev.pan}
+                  onChange={(e) => updateEv('pan', parseInt(e.target.value))} />
+                  <span className="slider-val">{ev.pan === 3 ? 'C' : ev.pan < 3 ? 'L' + (3 - ev.pan) : 'R' + (ev.pan - 3)}</span>
+                </div>
+                <div className="pan-labels"><span>L</span><span>{ev.pan === 3 ? '●' : ''}</span><span>R</span></div>
+              </div>
+              {/* Coarse Tune */}
+              <div className="ef">
+                <div className="ef-label">Coarse Tune</div>
+                <div className="slider-row">
+                  <input type="range" min="-4" max="3" value={ev.coarse}
+                  onChange={(e) => updateEv('coarse', parseInt(e.target.value))} />
+                  <span className="slider-val">{ev.coarse > 0 ? '+' : ''}{ev.coarse}st</span>
+                </div>
+              </div>
+              {/* Fine Tune */}
+              <div className="ef">
+                <div className="ef-label">Fine Tune</div>
+                <div className="slider-row">
+                  <input type="range" min="0" max="99" value={ev.fine}
+                  onChange={(e) => updateEv('fine', parseInt(e.target.value))} />
+                  <span className="slider-val">{ev.fine}¢</span>
+                </div>
+              </div>
+              {/* Output */}
+              <div className="ef">
+                <div className="ef-label">Output</div>
+                <div className="radio-group">
+                  {['Main', 'Aux'].map((lbl, i) =>
+                  <div key={i} className={`radio-btn${ev.output === i ? ' active' : ''}`}
+                  onClick={() => updateEv('output', i)}>{lbl}</div>
+                  )}
+                </div>
+              </div>
+              {/* Assign Group */}
+              <div className="ef">
+                <div className="ef-label">Assign Group</div>
+                <div className="radio-group">
+                  {['Multi', 'Single', 'Grp 1', 'Grp 2'].map((lbl, i) =>
+                  <div key={i} className={`radio-btn${ev.group === i ? ' active' : ''}`}
+                  onClick={() => updateEv('group', i)}>{lbl}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+            {/* Actions */}
+            <div className="editor-actions">
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button className="btn btn-accent" style={{ flex: 1 }} onClick={applyPad}>APPLY</button>
+                <button className="btn" style={{ flex: 1 }} onClick={previewPad}>PREVIEW ▶</button>
+              </div>
+              <label className="auto-send-row">
+                <input type="checkbox" checked={autoSend} onChange={(e) => setAutoSend(e.target.checked)} />
+                Auto-send kit after apply
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* TRIGGERS SCREEN */}
+      {screen === 'triggers' && (
+        <div className="triggers-page">
+
+          {/* LEFT: Kit Drum Map */}
+          <div className="trig-drummap">
+            <div className="panel-title">Kit Drum Map</div>
+            {kit ? (
+              <div className="trig-drummap-body">
+                <div className="trig-section-hdr">Root / Footswitch</div>
+                <div className="trig-note-row">
+                  <span className="trig-note-lbl">Root Note</span>
+                  <input className="trig-note-input" type="number" min="0" max="127"
+                    value={kit.rootNote}
+                    onChange={(e) => updateRootNote(e.target.value)} />
+                </div>
+                <div className="trig-note-row">
+                  <span className="trig-note-lbl">FSW Close</span>
+                  <input className="trig-note-input" type="number" min="0" max="127"
+                    value={kit.fswClose}
+                    onChange={(e) => updateFswNote('fswClose', e.target.value)} />
+                </div>
+                <div className="trig-note-row">
+                  <span className="trig-note-lbl">FSW Held</span>
+                  <input className="trig-note-input" type="number" min="0" max="127"
+                    value={kit.fswHeld}
+                    onChange={(e) => updateFswNote('fswHeld', e.target.value)} />
+                </div>
+                <div className="trig-section-hdr">Trigger Note Assignments</div>
+                {TRIG_NAMES.map((name, i) => (
+                  <div key={i} className="trig-note-row">
+                    <span className="trig-note-lbl">{i + 1} {name}</span>
+                    <input className="trig-note-input" type="number" min="0" max="127"
+                      value={kit.trigNotes[i] ?? 0}
+                      onChange={(e) => updateTrigNote(i, e.target.value)} />
+                  </div>
+                ))}
+                <div style={{marginTop:'8px'}}>
+                  <button className="btn btn-accent" style={{width:'100%'}} onClick={sendKit} disabled={!kit}>
+                    SEND KIT
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="trig-empty" style={{padding:'24px',fontSize:'12px'}}>
+                ← Load a kit first
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT: Hardware Trigger Setup */}
+          <div className="trig-setup-area">
+            <div className="trig-setup-toolbar">
+              <button className="btn btn-accent" onClick={requestTrigSetup}
+                disabled={!midiOutRef.current}>
+                REQUEST SETUP
+              </button>
+              <button className="btn" onClick={sendTrigSetupData}
+                disabled={!midiOutRef.current}>
+                SEND SETUP
+              </button>
+              <button className="btn btn-sm" onClick={resetTs}>REVERT</button>
+              {trigSetup
+                ? <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:'11px',color:'var(--led-on)',marginLeft:'8px'}}>
+                    ● LOADED
+                  </span>
+                : <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:'11px',color:'var(--text-dim)',marginLeft:'8px'}}>
+                    ○ NOT RECEIVED
+                  </span>
+              }
+            </div>
+
+            {/* 12 trigger cards */}
+            <div className="trig-card-grid">
+              {Array.from({length: 12}, (_, i) => (
+                <div key={i} className="trig-card">
+                  <div className="trig-card-title">
+                    TRIG {i + 1} <span style={{fontWeight:400,fontSize:'9px',opacity:0.7,letterSpacing:'0.05em'}}>
+                      {TRIG_NAMES[i]}
+                    </span>
+                  </div>
+
+                  {/* Gain */}
+                  <div className="trig-row">
+                    <div className="trig-row-lbl">Gain</div>
+                    <div className="trig-slider-row">
+                      <input type="range" min="0" max="99" value={ts.gains[i]}
+                        onChange={(e) => updateTs('gains', i, parseInt(e.target.value))} />
+                      <span className="trig-val">{ts.gains[i]}</span>
+                    </div>
+                  </div>
+
+                  {/* V-Curve */}
+                  <div className="trig-row">
+                    <div className="trig-row-lbl">Velocity Curve</div>
+                    <select className="trig-vcurve-sel" value={ts.vcurves[i]}
+                      onChange={(e) => updateTs('vcurves', i, parseInt(e.target.value))}>
+                      {VCURVE_NAMES.map((n, v) =>
+                        <option key={v} value={v}>{v} — {n}</option>
+                      )}
+                    </select>
+                  </div>
+
+                  {/* Cross-talk */}
+                  <div className="trig-row">
+                    <div className="trig-row-lbl">Cross-Talk</div>
+                    <div className="trig-slider-row">
+                      <input type="range" min="0" max="99" value={ts.xtalks[i]}
+                        onChange={(e) => updateTs('xtalks', i, parseInt(e.target.value))} />
+                      <span className="trig-val">{ts.xtalks[i]}</span>
+                    </div>
+                  </div>
+
+                  {/* Noise Floor */}
+                  <div className="trig-row">
+                    <div className="trig-row-lbl">Noise Floor</div>
+                    <div className="trig-slider-row">
+                      <input type="range" min="0" max="99" value={ts.noises[i]}
+                        onChange={(e) => updateTs('noises', i, parseInt(e.target.value))} />
+                      <span className="trig-val">{ts.noises[i]}</span>
+                    </div>
+                  </div>
+
+                  {/* Decay */}
+                  <div className="trig-row">
+                    <div className="trig-row-lbl">Decay</div>
+                    <div className="trig-slider-row">
+                      <input type="range" min="0" max="99" value={ts.decays[i]}
+                        onChange={(e) => updateTs('decays', i, parseInt(e.target.value))} />
+                      <span className="trig-val">{ts.decays[i]}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* LOG */}
+      <div className={`log-panel${logOpen ? ' open' : ' closed'}`}>
+        <div className="log-header" onClick={() => setLogOpen((v) => !v)}>
+          <div className="log-title">Activity Log</div>
+          {logs.length > 0 && <div style={{ fontSize: '10px', color: 'var(--text-dim)', fontFamily: "'Share Tech Mono'", marginLeft: '8px' }}>{logs.length}</div>}
+          <button className="btn btn-sm" style={{ marginLeft: '8px', padding: '1px 6px' }} onClick={(e) => {e.stopPropagation();setLogs([]);}}>CLR</button>
+          <div className="log-caret">{logOpen ? '▼' : '▲'}</div>
+        </div>
+        {logOpen &&
+        <div className="log-body" id="log-body">
+            {logs.map((l) =>
+          <div key={l.id} className={`log-line ${l.cls}`}>{l.text}</div>
+          )}
+          </div>
+        }
+      </div>
+
+      {/* TWEAKS */}
+      <div className={`tweaks-float${showTweaks ? ' visible' : ''}`}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <span style={{ fontFamily: "'Orbitron'", fontSize: '11px', fontWeight: '700', color: 'var(--accent)', letterSpacing: '0.1em' }}>TWEAKS</span>
+          <button className="btn btn-sm" onClick={() => {setShowTweaks(false);window.parent.postMessage({ type: '__edit_mode_dismissed' }, '*');}}>✕</button>
+        </div>
+        <div className="tweaks-section">
+          <div className="tweaks-label">Theme</div>
+          <div className="tweaks-opts">
+            {['ember', 'phosphor', 'cobalt'].map((t) =>
+            <div key={t} className={`tweaks-opt${theme === t ? ' active' : ''}`} onClick={() => setTweak('theme', t)}>
+                {t.toUpperCase()}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="tweaks-section">
+          <div className="tweaks-label">Pad Size</div>
+          <div className="tweaks-opts">
+            {['normal', 'compact'].map((s) =>
+            <div key={s} className={`tweaks-opt${padSize === s ? ' active' : ''}`} onClick={() => setTweak('padSize', s)}>
+                {s.toUpperCase()}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="tweaks-section">
+          <div className="tweaks-label">Log</div>
+          <div className="tweaks-opts">
+            <div className={`tweaks-opt${showLog ? ' active' : ''}`} onClick={() => {setShowLog(true);setLogOpen(true);setTweak('showLog', true);}}>SHOW</div>
+            <div className={`tweaks-opt${!showLog ? ' active' : ''}`} onClick={() => {setShowLog(false);setLogOpen(false);setTweak('showLog', false);}}>HIDE</div>
+          </div>
+        </div>
+      </div>
+
+    </div>);
+
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

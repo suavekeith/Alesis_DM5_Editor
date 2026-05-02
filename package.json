@@ -1,0 +1,36 @@
+{
+  "name": "dm5-editor",
+  "productName": "DM5 Editor",
+  "version": "1.0.0",
+  "description": "Alesis DM5 MIDI Drum Module Editor",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac --x64 --arm64"
+  },
+  "build": {
+    "appId": "com.dm5editor.app",
+    "productName": "DM5 Editor",
+    "mac": {
+      "category": "public.app-category.music",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "DM5Editor.html"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^41.3.0",
+    "electron-builder": "^26.8.1"
+  }
+}
