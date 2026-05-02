@@ -70,7 +70,6 @@ For trigger settings, click the **TRIGGERS** tab, press **REQUEST SETUP**, then 
 
 - [Alesis DM5 product page](https://www.alesis.com/products/view/dm5)
 - [Alesis DM5 Sound Chart](https://www.alesis.com/rscdn/1580/documents/dm5_soundchart.pdf)
-- [Alesis D4/DM5 MIDI Implementation](d4d5midm.pdf) — included in this repo
 
 ---
 
