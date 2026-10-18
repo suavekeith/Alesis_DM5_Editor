@@ -34,6 +34,7 @@ target_sources(DM5Editor
     PRIVATE
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
+        Source/MidiEngine.cpp
 )
 
 target_include_directories(DM5Editor
