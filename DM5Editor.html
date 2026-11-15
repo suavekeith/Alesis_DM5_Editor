@@ -3,10 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <title>Alesis DM5 Editor</title>
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<link href="vendor/fonts.css" rel="stylesheet">
+<script src="vendor/react.production.min.js"></script>
+<script src="vendor/react-dom.production.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -457,6 +456,101 @@ const TRIG_NAMES=["Bass Drum","Snare","Hi Tom","Mid Tom","Low Tom","Floor Tom",
                   "Hi-Hat","Crash 1","Ride","Crash 2","Aux 1","Aux 2"];
 </script>
 
+<!-- MIDI / FILE TRANSPORT (Web MIDI in Electron, native bridge in the plugin) -->
+<script>
+function createWebMidiTransport() {
+  let access = null, inp = null, out = null, msgCb = null, portsCb = null;
+  const ports = () => {
+    const inputs = [], outputs = [];
+    access.inputs.forEach((p) => inputs.push({ id: p.id, name: p.name }));
+    access.outputs.forEach((p) => outputs.push({ id: p.id, name: p.name }));
+    return { inputs, outputs };
+  };
+  return {
+    kind: 'webmidi',
+    async listPorts() {
+      if (!access) {
+        access = await navigator.requestMIDIAccess({ sysex: true });
+        access.onstatechange = () => { if (portsCb) portsCb(ports()); };
+      }
+      return ports();
+    },
+    async openPorts(inId, outId) {
+      if (inp) inp.onmidimessage = null;
+      inp = (access && inId && access.inputs.get(inId)) || null;
+      out = (access && outId && access.outputs.get(outId)) || null;
+      if (inp) inp.onmidimessage = (e) => { if (msgCb) msgCb(Array.from(e.data)); };
+      return { inName: inp ? inp.name : null, outName: out ? out.name : null };
+    },
+    send(bytes) { if (out) out.send(bytes); },
+    onMessage(cb) { msgCb = cb; },
+    onPortsChanged(cb) { portsCb = cb; },
+    async sendPaced(messages, gapMs, onProgress) {
+      for (let i = 0; i < messages.length; i++) {
+        if (!out) return false;
+        out.send(messages[i]);
+        if (onProgress) onProgress(i, messages.length);
+        if (i < messages.length - 1) await new Promise((r) => setTimeout(r, gapMs));
+      }
+      return true;
+    },
+    async saveFile({ defaultName, content }) {
+      if (window.electronAPI) return window.electronAPI.saveFile({ defaultName, content });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
+      a.download = defaultName; a.click();
+      return { success: true, path: null };
+    },
+    openFile() {
+      if (window.electronAPI) return window.electronAPI.openFile();
+      return new Promise((resolve) => {
+        const el = document.createElement('input');
+        el.type = 'file'; el.accept = '.json';
+        el.onchange = (e) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve({ success: true, content: ev.target.result });
+          reader.readAsText(e.target.files[0]);
+        };
+        el.click();
+      });
+    },
+    async getState() { return null; },
+    async setState() {}
+  };
+}
+
+function createJuceTransport() {
+  const backend = window.__JUCE__.backend;
+  const pending = new Map();
+  let nextId = 0, progressCb = null;
+  backend.addEventListener('__juce__complete', ({ promiseId, result }) => {
+    const resolve = pending.get(promiseId);
+    if (resolve) { pending.delete(promiseId); resolve(result); }
+  });
+  backend.addEventListener('sendProgress', ({ index, total }) => { if (progressCb) progressCb(index, total); });
+  const call = (name, ...params) => new Promise((resolve) => {
+    const resultId = nextId++;
+    pending.set(resultId, resolve);
+    backend.emitEvent('__juce__invoke', { name, params, resultId });
+  });
+  return {
+    kind: 'juce',
+    listPorts: () => call('listPorts'),
+    openPorts: (inId, outId) => call('openPorts', inId, outId),
+    send(bytes) { call('send', Array.from(bytes)); },
+    onMessage(cb) { backend.addEventListener('midi', (bytes) => cb(bytes)); },
+    onPortsChanged(cb) { backend.addEventListener('portsChanged', cb); },
+    sendPaced(messages, gapMs, onProgress) { progressCb = onProgress; return call('sendPaced', messages, gapMs); },
+    saveFile: (opts) => call('saveFile', opts),
+    openFile: () => call('openFile'),
+    getState: () => call('getState'),
+    setState: (state) => call('setState', state)
+  };
+}
+
+const transport = window.__JUCE__ ? createJuceTransport() : createWebMidiTransport();
+</script>
+
 <script type="text/babel">
 
 const { useState, useEffect, useRef, useCallback } = React;
@@ -508,9 +602,7 @@ function App() {
   const [ev, setEv] = useState({ bank: 0, sound: 0, volume: 99, pan: 3, output: 0, group: 0, coarse: 0, fine: 0 });
 
   // refs for MIDI callbacks
-  const midiAccessRef = useRef(null);
-  const midiOutRef = useRef(null);
-  const midiInRef = useRef(null);
+  const outOpenRef = useRef(false);
   const libraryRef = useRef(Array(21).fill(null));
   const kitRef = useRef(null);
   const sysexBufRef = useRef([]); // accumulates fragmented SysEx
@@ -548,8 +640,7 @@ function App() {
     addLog(`SysEx ${msg.length}b: ${head}…`, 'info');
   }, [addLog]);
 
-  const handleMIDI = useCallback((e) => {
-    const bytes = Array.from(e.data);
+  const handleMIDI = useCallback((bytes) => {
     if (!bytes.length) return;
     if (bytes[0] < 0x80) {
       if (sysexBufRef.current.length > 0) sysexBufRef.current.push(...bytes);
@@ -571,38 +662,30 @@ function App() {
     }
   }, [processSysEx]);
 
-  // Stable ref so openPorts always dispatches to the latest handleMIDI
+  // Stable ref so the transport always dispatches to the latest handleMIDI
   const handleMIDIRef = useRef(null);
   useEffect(() => { handleMIDIRef.current = handleMIDI; }, [handleMIDI]);
+  useEffect(() => { transport.onMessage((bytes) => handleMIDIRef.current?.(bytes)); }, []);
 
-  const openPorts = useCallback((access, inId, outId) => {
-    if (!access) return;
-    if (midiInRef.current) midiInRef.current.onmidimessage = null;
-    const inp = inId ? access.inputs.get(inId) : null;
-    const out = outId ? access.outputs.get(outId) : null;
-    midiInRef.current = inp;midiOutRef.current = out;
-    if (inp) inp.onmidimessage = (e) => handleMIDIRef.current?.(e);
-    const ok = !!(inp && out);
+  const openPorts = useCallback(async (inId, outId) => {
+    const r = await transport.openPorts(inId, outId);
+    outOpenRef.current = !!r.outName;
+    const ok = !!(r.inName && r.outName);
     setMidiStatus({
       ok, warn: !!(inId || outId) && !ok,
-      text: ok ? inp.name.substring(0, 24) : inId || outId ? 'PARTIAL' : 'NO PORTS'
+      text: ok ? r.inName.substring(0, 24) : inId || outId ? 'PARTIAL' : 'NO PORTS'
     });
-    if (ok) addLog(`Ports: in="${inp.name}" out="${out.name}"`, 'info');
+    if (ok) addLog(`Ports: in="${r.inName}" out="${r.outName}"`, 'info');
   }, [addLog]);
 
-  const populatePorts = useCallback((access) => {
-    const ins = [],outs = [];
-    access.inputs.forEach((p) => ins.push({ id: p.id, name: p.name }));
-    access.outputs.forEach((p) => outs.push({ id: p.id, name: p.name }));
-    setInputPorts(ins);setOutputPorts(outs);
+  const populatePorts = useCallback((p) => {
+    setInputPorts(p.inputs);setOutputPorts(p.outputs);
   }, []);
 
   const initMIDI = async () => {
     try {
-      const access = await navigator.requestMIDIAccess({ sysex: true });
-      midiAccessRef.current = access;
-      populatePorts(access);
-      access.onstatechange = () => populatePorts(access);
+      populatePorts(await transport.listPorts());
+      transport.onPortsChanged(populatePorts);
       setMidiStatus({ ok: false, warn: true, text: 'SELECT PORTS' });
       addLog('MIDI ready — select ports.', 'info');
     } catch (e) {
@@ -613,42 +696,44 @@ function App() {
 
   const handleInChange = (id) => {
     setSelectedInId(id);
-    openPorts(midiAccessRef.current, id, selectedOutId);
+    openPorts(id, selectedOutId);
   };
   const handleOutChange = (id) => {
     setSelectedOutId(id);
-    openPorts(midiAccessRef.current, selectedInId, id);
+    openPorts(selectedInId, id);
   };
 
+  const kitRequestMsg = (i) => [0xF0, 0x00, 0x00, 0x0E, DEVICE_ID, 0x7F, 0x40 | (0x20 + i), 0xF7];
+  const logKitRequest = (i) =>
+    addLog(`→ REQ kit ${i} [${kitRequestMsg(i).map(b=>b.toString(16).padStart(2,'0').toUpperCase()).join(' ')}]`, 'info');
+
   const requestKit = (i) => {
-    if (!midiOutRef.current) {addLog('No MIDI output.', 'err');return;}
-    const op = 0x40 | (0x20 + i);
-    const msg = [0xF0, 0x00, 0x00, 0x0E, DEVICE_ID, 0x7F, op, 0xF7];
-    addLog(`→ REQ kit ${i} [${msg.map(b=>b.toString(16).padStart(2,'0').toUpperCase()).join(' ')}]`, 'info');
-    midiOutRef.current.send(msg);
+    if (!outOpenRef.current) {addLog('No MIDI output.', 'err');return;}
+    logKitRequest(i);
+    transport.send(kitRequestMsg(i));
   };
 
   const requestAllKits = async () => {
-    if (!midiOutRef.current) {addLog('No MIDI output.', 'err');return;}
+    if (!outOpenRef.current) {addLog('No MIDI output.', 'err');return;}
     sysexBufRef.current = [];
     addLog('Requesting all 21 drumsets…', 'info');
     setIsSending(true);
-    for (let i = 0; i <= 20; i++) {
-      if (!midiOutRef.current) break;
-      requestKit(i);
-      setSendProgress(Math.round((i + 1) / 21 * 100));
-      if (i < 20) await new Promise((r) => setTimeout(r, 300));
-    }
+    const msgs = Array.from({ length: 21 }, (_, i) => kitRequestMsg(i));
+    await transport.sendPaced(msgs, 300, (i, total) => {
+      logKitRequest(i);
+      setSendProgress(Math.round((i + 1) / total * 100));
+    });
     setIsSending(false);setSendProgress(0);
     addLog('All kit requests sent.', 'info');
   };
 
   const sendNRPN = (lsb, value, maxVal) => {
-    if (!midiOutRef.current) return;
+    if (!outOpenRef.current) return;
     const v = Math.round(Math.max(0, Math.min(value, maxVal)) * 127 / maxVal);
-    midiOutRef.current.send([0xB9, 99, 0x00]);
-    midiOutRef.current.send([0xB9, 98, lsb]);
-    midiOutRef.current.send([0xB9, 6, v]);
+    const cc = 0xB0 | midiCh;
+    transport.send([cc, 99, 0x00]);
+    transport.send([cc, 98, lsb]);
+    transport.send([cc, 6, v]);
   };
   const pushNRPN = (p) => {
     sendNRPN(0x08, p.bank, 7);sendNRPN(0x09, p.sound, 99);
@@ -657,10 +742,10 @@ function App() {
   };
 
   const sendKitData = (k, idx) => {
-    if (!midiOutRef.current || !k) return;
+    if (!outOpenRef.current || !k) return;
     const data = buildKitSysEx(k, idx);
     if (data.length !== 343) {addLog(`Build error: ${data.length}b`, 'err');return;}
-    midiOutRef.current.send(data);
+    transport.send(data);
     addLog(`Sent kit ${idx}: "${k.name.trim()}"`, 'ok');
   };
 
@@ -670,16 +755,20 @@ function App() {
   };
 
   const sendAllKits = async () => {
-    if (!midiOutRef.current) {addLog('No MIDI output.', 'err');return;}
-    const toSend = libraryRef.current.map((k, i) => ({ k, i })).filter(({ k }) => k !== null);
+    if (!outOpenRef.current) {addLog('No MIDI output.', 'err');return;}
+    const toSend = [];
+    libraryRef.current.forEach((k, i) => {
+      if (k === null) return;
+      const data = buildKitSysEx(k, i);
+      if (data.length !== 343) {addLog(`Build error: ${data.length}b`, 'err');return;}
+      toSend.push({ k, i, data });
+    });
     if (!toSend.length) {addLog('No kits loaded.', 'err');return;}
     setIsSending(true);
-    for (let n = 0; n < toSend.length; n++) {
-      const { k, i } = toSend[n];
-      sendKitData(k, i);
-      setSendProgress(Math.round((n + 1) / toSend.length * 100));
-      if (n < toSend.length - 1) await new Promise((r) => setTimeout(r, 400));
-    }
+    await transport.sendPaced(toSend.map((t) => t.data), 400, (n, total) => {
+      addLog(`Sent kit ${toSend[n].i}: "${toSend[n].k.name.trim()}"`, 'ok');
+      setSendProgress(Math.round((n + 1) / total * 100));
+    });
     setIsSending(false);setSendProgress(0);
     addLog('All kits sent.', 'ok');
   };
@@ -691,8 +780,8 @@ function App() {
     const copy = JSON.parse(JSON.stringify(k));
     setKit(copy);kitRef.current = copy;
     setActiveKitIdx(idx);setSelectedPad(null);
-    if (autoPC && midiOutRef.current) {
-      midiOutRef.current.send([0xC0 | midiCh, idx]);
+    if (autoPC && outOpenRef.current) {
+      transport.send([0xC0 | midiCh, idx]);
       addLog(`Kit ${idx}: "${copy.name.trim()}" + PC→ch${midiCh + 1}`, 'info');
     } else {
       addLog(`Loaded kit ${idx}: "${copy.name.trim()}"`, 'info');
@@ -739,11 +828,11 @@ function App() {
 
   const previewPad = () => {
     if (selectedPad === null) {addLog('No pad selected.', 'err');return;}
-    if (!midiOutRef.current) {addLog('No MIDI output.', 'err');return;}
+    if (!outOpenRef.current) {addLog('No MIDI output.', 'err');return;}
     pushNRPN(ev);
     const note = (kitRef.current?.rootNote || 36) + selectedPad & 0x7F;
-    midiOutRef.current.send([0x99, note, 100]);
-    setTimeout(() => midiOutRef.current?.send([0x89, note, 0]), 200);
+    transport.send([0x99, note, 100]);
+    setTimeout(() => transport.send([0x89, note, 0]), 200);
     addLog(`Preview pad ${selectedPad} → note ${note}`, 'info');
   };
 
@@ -769,27 +858,13 @@ function App() {
     const loaded = library.filter(Boolean);
     if (!loaded.length) {addLog('No kits to export.', 'err');return;}
     const json = JSON.stringify({ version: 1, kits: library }, null, 2);
-    if (window.electronAPI) {
-      const r = await window.electronAPI.saveFile({ defaultName: 'dm5-kits.json', content: json });
-      if (r.success) addLog(`Saved: ${r.path}`, 'ok');
-    } else {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
-      a.download = 'dm5-kits.json';a.click();
-      addLog(`Exported ${loaded.length} kits`, 'ok');
-    }
+    const r = await transport.saveFile({ defaultName: 'dm5-kits.json', content: json });
+    if (r.success) addLog(r.path ? `Saved: ${r.path}` : `Exported ${loaded.length} kits`, 'ok');
   };
 
   const importJSON = async () => {
-    if (window.electronAPI) {
-      const r = await window.electronAPI.openFile();
-      if (r.success) applyImport(r.content);
-    } else {
-      const inp = document.createElement('input');
-      inp.type = 'file';inp.accept = '.json';
-      inp.onchange = (e) => {const reader = new FileReader();reader.onload = (ev) => applyImport(ev.target.result);reader.readAsText(e.target.files[0]);};
-      inp.click();
-    }
+    const r = await transport.openFile();
+    if (r.success) applyImport(r.content);
   };
 
   const applyImport = (json) => {
@@ -806,16 +881,16 @@ function App() {
 
   // ── TRIGGER SETUP ──
   const requestTrigSetup = () => {
-    if (!midiOutRef.current) {addLog('No MIDI output.', 'err');return;}
-    midiOutRef.current.send([0xF0, 0x00, 0x00, 0x0E, DEVICE_ID, 0x7F, 0x45, 0xF7]);
+    if (!outOpenRef.current) {addLog('No MIDI output.', 'err');return;}
+    transport.send([0xF0, 0x00, 0x00, 0x0E, DEVICE_ID, 0x7F, 0x45, 0xF7]);
     addLog('Requested trigger setup.', 'info');
   };
 
   const sendTrigSetupData = () => {
-    if (!midiOutRef.current) {addLog('No MIDI output.', 'err');return;}
+    if (!outOpenRef.current) {addLog('No MIDI output.', 'err');return;}
     const data = buildTrigSetupSysEx(ts);
     if (data.length !== 69) {addLog(`Trig build error: ${data.length}b`, 'err');return;}
-    midiOutRef.current.send(data);
+    transport.send(data);
     setTrigSetup(JSON.parse(JSON.stringify(ts)));
     addLog('Sent trigger setup.', 'ok');
   };
@@ -1195,11 +1270,11 @@ function App() {
           <div className="trig-setup-area">
             <div className="trig-setup-toolbar">
               <button className="btn btn-accent" onClick={requestTrigSetup}
-                disabled={!midiOutRef.current}>
+                disabled={!outOpenRef.current}>
                 REQUEST SETUP
               </button>
               <button className="btn" onClick={sendTrigSetupData}
-                disabled={!midiOutRef.current}>
+                disabled={!outOpenRef.current}>
                 SEND SETUP
               </button>
               <button className="btn btn-sm" onClick={resetTs}>REVERT</button>

@@ -16,7 +16,7 @@ function createWindow() {
     }
   });
 
-  win.loadFile('DM5Editor.html');
+  win.loadFile(path.join(__dirname, 'plugin', 'WebUI', 'index.html'));
 
   // Auto-grant MIDI + sysex permission — no browser popup needed
   win.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
