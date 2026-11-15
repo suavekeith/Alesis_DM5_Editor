@@ -1,159 +1,180 @@
 #include "MidiEngine.h"
 
-MidiEngine::MidiEngine() {}
+MidiEngine::MidiEngine() : juce::Thread ("DM5 paced send") {}
 
 MidiEngine::~MidiEngine()
 {
+    stopThread (2000);
     closePorts();
+    cancelPendingUpdate();
 }
 
-juce::Array<juce::MidiDeviceInfo> MidiEngine::getInputDevices() const
-{
-    return juce::MidiInput::getAvailableDevices();
-}
-
-juce::Array<juce::MidiDeviceInfo> MidiEngine::getOutputDevices() const
-{
-    return juce::MidiOutput::getAvailableDevices();
-}
-
-bool MidiEngine::openPorts (const juce::String& inId, const juce::String& outId)
+MidiEngine::OpenResult MidiEngine::openPorts (const juce::String& inId, const juce::String& outId)
 {
     closePorts();
 
-    auto newOut = juce::MidiOutput::openDevice (outId);
-    if (!newOut)
+    OpenResult result;
+
+    if (outId.isNotEmpty())
     {
-        dispatchLog ("Failed to open MIDI output: " + outId);
-        return false;
+        if (auto out = juce::MidiOutput::openDevice (outId))
+        {
+            result.outName = out->getName();
+            const juce::ScopedLock sl (outLock);
+            midiOut = std::move (out);
+        }
     }
 
-    auto newIn = juce::MidiInput::openDevice (inId, this);
-    if (!newIn)
+    if (inId.isNotEmpty())
     {
-        dispatchLog ("Failed to open MIDI input: " + inId);
-        return false;
+        if (auto in = juce::MidiInput::openDevice (inId, this))
+        {
+            result.inName = in->getName();
+            midiIn = std::move (in);
+            midiIn->start();
+        }
     }
 
-    midiOut = std::move (newOut);
-    midiIn  = std::move (newIn);
-    midiIn->start();
-    sysexBuf.clear();
-
-    dispatchLog ("Ports open — in: " + currentInName() + "  out: " + currentOutName());
-    return true;
+    return result;
 }
 
 void MidiEngine::closePorts()
 {
-    if (midiIn)  { midiIn->stop(); midiIn.reset(); }
-    if (midiOut) { midiOut.reset(); }
-    sysexBuf.clear();
-}
-
-bool MidiEngine::isOpen() const { return midiIn != nullptr && midiOut != nullptr; }
-
-juce::String MidiEngine::currentInName() const
-{
-    return midiIn ? midiIn->getName() : juce::String{};
-}
-
-juce::String MidiEngine::currentOutName() const
-{
-    return midiOut ? midiOut->getName() : juce::String{};
-}
-
-void MidiEngine::sendKitRequest (int kitIndex)
-{
-    if (!midiOut)
+    if (midiIn != nullptr)
     {
-        dispatchLog ("No MIDI output — select ports first");
-        return;
+        midiIn->stop();
+        midiIn.reset();
     }
-    // Request opcode: 0x40 | (0x20 + kit)
-    const uint8_t op = uint8_t (0x40 | (0x20 + kitIndex));
-    const uint8_t msg[] = { 0xF0, 0x00, 0x00, 0x0E, 0x13, 0x7F, op, 0xF7 };
-    midiOut->sendMessageNow (juce::MidiMessage (msg, (int) sizeof (msg)));
-    dispatchLog ("Sent kit " + juce::String (kitIndex) + " request (op=0x"
-                 + juce::String::toHexString (op) + ")");
+
+    const juce::ScopedLock sl (outLock);
+    midiOut.reset();
 }
 
-void MidiEngine::setLogCallback (LogFn fn)
+void MidiEngine::send (const Bytes& bytes)
 {
-    juce::ScopedLock sl (logLock);
-    logFn = std::move (fn);
+    if (bytes.empty())
+        return;
+
+    const juce::ScopedLock sl (outLock);
+
+    if (midiOut != nullptr)
+        midiOut->sendMessageNow (juce::MidiMessage (bytes.data(), (int) bytes.size()));
 }
 
-// Called on MIDI thread — copy data and marshal everything to the message thread.
+void MidiEngine::sendPaced (int jobId, std::vector<Bytes> messages, int gapMs)
+{
+    {
+        const juce::ScopedLock sl (jobLock);
+        jobs.push_back ({ jobId, std::move (messages), gapMs });
+    }
+
+    if (! isThreadRunning())
+        startThread();
+
+    notify();
+}
+
+// Waits for the full gap even if notify() wakes the thread early; false means the thread should exit.
+bool MidiEngine::pause (int ms)
+{
+    const auto end = juce::Time::getMillisecondCounter() + (juce::uint32) ms;
+
+    while (! threadShouldExit())
+    {
+        const auto now = juce::Time::getMillisecondCounter();
+
+        if (now >= end)
+            return true;
+
+        wait ((int) (end - now));
+    }
+
+    return false;
+}
+
+void MidiEngine::run()
+{
+    while (! threadShouldExit())
+    {
+        Job job;
+        bool haveJob = false;
+
+        {
+            const juce::ScopedLock sl (jobLock);
+
+            if (! jobs.empty())
+            {
+                job = std::move (jobs.front());
+                jobs.pop_front();
+                haveJob = true;
+            }
+        }
+
+        if (! haveJob)
+        {
+            wait (-1);
+            continue;
+        }
+
+        const auto total = (int) job.messages.size();
+
+        for (int i = 0; i < total; ++i)
+        {
+            send (job.messages[(size_t) i]);
+
+            Event progress;
+            progress.jobId = job.id;
+            progress.index = i;
+            progress.total = total;
+            post (std::move (progress));
+
+            if (i < total - 1 && ! pause (job.gapMs))
+                return;
+        }
+
+        Event finished;
+        finished.jobId = job.id;
+        finished.total = total;
+        finished.done = true;
+        post (std::move (finished));
+    }
+}
+
 void MidiEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& msg)
 {
-    const uint8_t* raw = msg.getRawData();
-    const int      len = msg.getRawDataSize();
+    if (! msg.isSysEx())
+        return;
 
-    if (msg.isSysEx())
-    {
-        // Feed the reassembly buffer (guard against fragmentation)
-        for (int i = 0; i < len; ++i)
-            sysexBuf.add (raw[i]);
-
-        // A complete SysEx ends with F7
-        if (sysexBuf.getLast() == 0xF7)
-        {
-            // Copy out and clear buffer before dispatching (avoid reentrancy)
-            juce::Array<uint8_t> complete;
-            complete.swapWith (sysexBuf);
-
-            const int  msgLen   = complete.size();
-            juce::String logMsg;
-
-            if (msgLen == 343)
-            {
-                const uint8_t  op       = complete[6];
-                const uint8_t  expected = calcChecksum (complete.data(), msgLen);
-                const uint8_t  actual   = complete[341];
-                const bool     ok       = (expected == actual);
-
-                logMsg = "SysEx " + juce::String (msgLen) + " bytes  "
-                         "op=0x" + juce::String::toHexString (op) + "  "
-                         "checksum " + (ok ? "OK" : "FAIL")
-                         + " (exp=0x" + juce::String::toHexString (expected)
-                         + " got=0x" + juce::String::toHexString (actual) + ")";
-            }
-            else
-            {
-                logMsg = "SysEx " + juce::String (msgLen)
-                         + " bytes (expected 343 for a kit dump)";
-            }
-
-            dispatchLog (logMsg);
-        }
-    }
-    // Non-SysEx messages during an ongoing fragment assembly reset the buffer
-    else if (!sysexBuf.isEmpty())
-    {
-        sysexBuf.clear();
-        dispatchLog ("SysEx fragment interrupted by non-SysEx message");
-    }
+    Event e;
+    e.isMidi = true;
+    e.bytes.assign (msg.getRawData(), msg.getRawData() + msg.getRawDataSize());
+    post (std::move (e));
 }
 
-// static
-uint8_t MidiEngine::calcChecksum (const uint8_t* data, int len)
+void MidiEngine::post (Event e)
 {
-    int sum = 0;
-    for (int i = 7; i <= 340 && i < len; ++i)
-        sum += data[i];
-    return uint8_t (sum & 0x7F);
+    {
+        const juce::ScopedLock sl (eventLock);
+        events.push_back (std::move (e));
+    }
+
+    triggerAsyncUpdate();
 }
 
-void MidiEngine::dispatchLog (const juce::String& msg)
+void MidiEngine::handleAsyncUpdate()
 {
-    // Capture logFn by value so this object's lifetime doesn't matter
-    LogFn fn;
-    {
-        juce::ScopedLock sl (logLock);
-        fn = logFn;
-    }
-    if (!fn) return;
+    std::vector<Event> pending;
 
-    juce::MessageManager::callAsync ([fn, msg] { fn (msg); });
+    {
+        const juce::ScopedLock sl (eventLock);
+        pending.swap (events);
+    }
+
+    for (const auto& e : pending)
+    {
+        if (e.isMidi)
+            listeners.call ([&] (Listener& l) { l.midiReceived (e.bytes); });
+        else
+            listeners.call ([&] (Listener& l) { l.sendProgress (e.jobId, e.index, e.total, e.done); });
+    }
 }

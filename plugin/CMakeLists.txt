@@ -17,7 +17,7 @@ juce_add_plugin(DM5Editor
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
-    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     COPY_PLUGIN_AFTER_BUILD TRUE
     AU_MAIN_TYPE kAudioUnitType_Effect
     NEEDS_WEB_BROWSER TRUE
@@ -42,10 +42,37 @@ target_include_directories(DM5Editor
         Source
 )
 
+set(WEBUI_FILES
+    index.html
+    vendor/react.production.min.js
+    vendor/react-dom.production.min.js
+    vendor/fonts.css
+    vendor/fonts/orbitron-latin-400-normal.woff2
+    vendor/fonts/orbitron-latin-700-normal.woff2
+    vendor/fonts/orbitron-latin-900-normal.woff2
+    vendor/fonts/share-tech-mono-latin-400-normal.woff2
+    vendor/fonts/rajdhani-latin-400-normal.woff2
+    vendor/fonts/rajdhani-latin-500-normal.woff2
+    vendor/fonts/rajdhani-latin-600-normal.woff2
+    vendor/fonts/rajdhani-latin-700-normal.woff2
+)
+list(TRANSFORM WEBUI_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/WebUI/")
+
+add_custom_command(
+    OUTPUT ${WEBUI_FILES}
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build-webui.sh"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../DM5Editor.html"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build-webui.sh"
+    COMMENT "Building web UI"
+)
+
+juce_add_binary_data(DM5WebUI SOURCES ${WEBUI_FILES})
+
 juce_generate_juce_header(DM5Editor)
 
 target_link_libraries(DM5Editor
     PRIVATE
+        DM5WebUI
         juce::juce_audio_utils
         juce::juce_gui_extra
     PUBLIC

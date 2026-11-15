@@ -1,128 +1,229 @@
 #include "PluginEditor.h"
 
-DM5AudioProcessorEditor::DM5AudioProcessorEditor (DM5AudioProcessor& p)
-    : AudioProcessorEditor (&p), audioProcessor (p)
+namespace
 {
-    setSize (640, 420);
-    setResizable (true, true);
+MidiEngine::Bytes toBytes (const juce::var& v)
+{
+    MidiEngine::Bytes bytes;
 
-    addAndMakeVisible (inLabel);
-    addAndMakeVisible (outLabel);
-    addAndMakeVisible (inCombo);
-    addAndMakeVisible (outCombo);
-    addAndMakeVisible (refreshBtn);
-    addAndMakeVisible (requestBtn);
-    addAndMakeVisible (logBox);
+    if (auto* arr = v.getArray())
+    {
+        bytes.reserve ((size_t) arr->size());
 
-    logBox.setMultiLine (true);
-    logBox.setReadOnly (true);
-    logBox.setScrollbarsShown (true);
-    logBox.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 12.0f, 0));
+        for (const auto& b : *arr)
+            bytes.push_back ((uint8_t) (int) b);
+    }
 
-    refreshBtn.onClick = [this] { refreshDeviceLists(); };
+    return bytes;
+}
 
-    inCombo.onChange  = [this] { openSelectedPorts(); };
-    outCombo.onChange = [this] { openSelectedPorts(); };
+juce::var portList()
+{
+    const auto describe = [] (const juce::Array<juce::MidiDeviceInfo>& devices)
+    {
+        juce::Array<juce::var> list;
 
-    requestBtn.onClick = [this] {
-        audioProcessor.getMidiEngine().sendKitRequest (0);
+        for (const auto& d : devices)
+        {
+            juce::DynamicObject::Ptr o { new juce::DynamicObject() };
+            o->setProperty ("id", d.identifier);
+            o->setProperty ("name", d.name);
+            list.add (o.get());
+        }
+
+        return list;
     };
 
-    audioProcessor.getMidiEngine().setLogCallback ([this] (const juce::String& msg) {
-        appendLog (msg);
+    juce::DynamicObject::Ptr ports { new juce::DynamicObject() };
+    ports->setProperty ("inputs",  describe (juce::MidiInput::getAvailableDevices()));
+    ports->setProperty ("outputs", describe (juce::MidiOutput::getAvailableDevices()));
+    return ports.get();
+}
+
+juce::var nameOrNull (const juce::String& name)
+{
+    return name.isEmpty() ? juce::var() : juce::var (name);
+}
+
+juce::var fileResult (bool success)
+{
+    juce::DynamicObject::Ptr o { new juce::DynamicObject() };
+    o->setProperty ("success", success);
+    return o.get();
+}
+
+std::optional<juce::WebBrowserComponent::Resource> webResource (const juce::String& url)
+{
+    const auto path = url == "/" ? juce::String ("index.html") : url.fromLastOccurrenceOf ("/", false, false);
+
+    for (int i = 0; i < BinaryData::namedResourceListSize; ++i)
+    {
+        if (path != BinaryData::originalFilenames[i])
+            continue;
+
+        int size = 0;
+        const auto* data = BinaryData::getNamedResource (BinaryData::namedResourceList[i], size);
+
+        const auto mime = path.endsWith (".html")  ? "text/html"
+                        : path.endsWith (".js")    ? "text/javascript"
+                        : path.endsWith (".css")   ? "text/css"
+                        : path.endsWith (".woff2") ? "font/woff2"
+                                                   : "application/octet-stream";
+
+        const auto* begin = reinterpret_cast<const std::byte*> (data);
+        return juce::WebBrowserComponent::Resource { { begin, begin + size }, mime };
+    }
+
+    return std::nullopt;
+}
+}
+
+DM5AudioProcessorEditor::DM5AudioProcessorEditor (DM5AudioProcessor& p)
+    : AudioProcessorEditor (&p),
+      engine (p.getMidiEngine()),
+      browser (makeOptions())
+{
+    addAndMakeVisible (browser);
+
+    setResizable (true, true);
+    setResizeLimits (900, 700, 3840, 2160);
+    setSize (1280, 960);
+
+    engine.addListener (this);
+
+    deviceListConnection = juce::MidiDeviceListConnection::make ([this]
+    {
+        browser.emitEventIfBrowserIsVisible ("portsChanged", portList());
     });
 
-    refreshDeviceLists();
+    browser.goToURL (juce::WebBrowserComponent::getResourceProviderRoot());
 }
 
 DM5AudioProcessorEditor::~DM5AudioProcessorEditor()
 {
-    audioProcessor.getMidiEngine().setLogCallback (nullptr);
-}
-
-void DM5AudioProcessorEditor::paint (juce::Graphics& g)
-{
-    g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
+    engine.removeListener (this);
 }
 
 void DM5AudioProcessorEditor::resized()
 {
-    auto area = getLocalBounds().reduced (8);
-    const int rowH   = 28;
-    const int labelW = 68;
-    const int gap    = 4;
-
-    auto row1 = area.removeFromTop (rowH);
-    inLabel.setBounds (row1.removeFromLeft (labelW));
-    row1.removeFromLeft (gap);
-    refreshBtn.setBounds (row1.removeFromRight (72));
-    row1.removeFromRight (gap);
-    inCombo.setBounds (row1);
-
-    area.removeFromTop (gap);
-
-    auto row2 = area.removeFromTop (rowH);
-    outLabel.setBounds (row2.removeFromLeft (labelW));
-    row2.removeFromLeft (gap);
-    outCombo.setBounds (row2);
-
-    area.removeFromTop (gap);
-
-    auto row3 = area.removeFromTop (rowH + 4);
-    requestBtn.setBounds (row3.withWidth (130));
-
-    area.removeFromTop (gap);
-    logBox.setBounds (area);
+    browser.setBounds (getLocalBounds());
 }
 
-void DM5AudioProcessorEditor::refreshDeviceLists()
+juce::WebBrowserComponent::Options DM5AudioProcessorEditor::makeOptions()
 {
-    auto& engine = audioProcessor.getMidiEngine();
+    using Args = juce::Array<juce::var>;
 
-    const auto savedIn  = inCombo.getText();
-    const auto savedOut = outCombo.getText();
+    return juce::WebBrowserComponent::Options()
+        .withNativeIntegrationEnabled()
+        .withResourceProvider ([] (const juce::String& url) { return webResource (url); })
+        .withNativeFunction ("listPorts", [] (const Args&, Completion complete)
+        {
+            complete (portList());
+        })
+        .withNativeFunction ("openPorts", [this] (const Args& args, Completion complete)
+        {
+            const auto opened = engine.openPorts (args[0].toString(), args[1].toString());
 
-    inCombo.clear  (juce::dontSendNotification);
-    outCombo.clear (juce::dontSendNotification);
+            juce::DynamicObject::Ptr o { new juce::DynamicObject() };
+            o->setProperty ("inName",  nameOrNull (opened.inName));
+            o->setProperty ("outName", nameOrNull (opened.outName));
+            complete (o.get());
+        })
+        .withNativeFunction ("send", [this] (const Args& args, Completion complete)
+        {
+            engine.send (toBytes (args[0]));
+            complete (true);
+        })
+        .withNativeFunction ("sendPaced", [this] (const Args& args, Completion complete)
+        {
+            std::vector<MidiEngine::Bytes> messages;
 
-    int selIn = 0, selOut = 0;
+            if (auto* arr = args[1].getArray())
+                for (const auto& m : *arr)
+                    messages.push_back (toBytes (m));
 
-    for (auto& d : engine.getInputDevices())
-    {
-        inCombo.addItem (d.name, inCombo.getNumItems() + 1);
-        if (d.name == savedIn)  selIn  = inCombo.getNumItems();
-    }
-    for (auto& d : engine.getOutputDevices())
-    {
-        outCombo.addItem (d.name, outCombo.getNumItems() + 1);
-        if (d.name == savedOut) selOut = outCombo.getNumItems();
-    }
-
-    inCombo.setSelectedId  (selIn,  juce::dontSendNotification);
-    outCombo.setSelectedId (selOut, juce::dontSendNotification);
+            engine.sendPaced ((int) args[0], std::move (messages), (int) args[2]);
+            complete (true);
+        })
+        .withNativeFunction ("saveFile", [this] (const Args& args, Completion complete)
+        {
+            saveFile (args, std::move (complete));
+        })
+        .withNativeFunction ("openFile", [this] (const Args&, Completion complete)
+        {
+            openFile (std::move (complete));
+        })
+        .withNativeFunction ("getState", [] (const Args&, Completion complete)
+        {
+            complete (juce::var());
+        })
+        .withNativeFunction ("setState", [] (const Args&, Completion complete)
+        {
+            complete (true);
+        });
 }
 
-void DM5AudioProcessorEditor::openSelectedPorts()
+void DM5AudioProcessorEditor::saveFile (const juce::Array<juce::var>& args, Completion complete)
 {
-    auto& engine   = audioProcessor.getMidiEngine();
-    const auto inName  = inCombo.getText();
-    const auto outName = outCombo.getText();
+    const auto name    = args[0].getProperty ("defaultName", "dm5-kits.json").toString();
+    const auto content = args[0].getProperty ("content", "").toString();
+    const auto start   = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (name);
 
-    if (inName.isEmpty() || outName.isEmpty())
-        return;
+    chooser = std::make_unique<juce::FileChooser> ("Export kits", start, "*.json");
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode
+                              | juce::FileBrowserComponent::canSelectFiles
+                              | juce::FileBrowserComponent::warnAboutOverwriting,
+                          [content, complete] (const juce::FileChooser& fc)
+                          {
+                              const auto file = fc.getResult();
+                              const auto ok = file != juce::File() && file.replaceWithText (content);
 
-    juce::String inId, outId;
-    for (auto& d : engine.getInputDevices())
-        if (d.name == inName)  { inId  = d.identifier; break; }
-    for (auto& d : engine.getOutputDevices())
-        if (d.name == outName) { outId = d.identifier; break; }
+                              auto result = fileResult (ok);
 
-    if (inId.isNotEmpty() && outId.isNotEmpty())
-        engine.openPorts (inId, outId);
+                              if (ok)
+                                  result.getDynamicObject()->setProperty ("path", file.getFullPathName());
+
+                              complete (result);
+                          });
 }
 
-void DM5AudioProcessorEditor::appendLog (const juce::String& msg)
+void DM5AudioProcessorEditor::openFile (Completion complete)
 {
-    logBox.moveCaretToEnd();
-    logBox.insertTextAtCaret (msg + "\n");
+    const auto start = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+
+    chooser = std::make_unique<juce::FileChooser> ("Import kits", start, "*.json");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                          [complete] (const juce::FileChooser& fc)
+                          {
+                              const auto file = fc.getResult();
+                              const auto ok = file.existsAsFile();
+
+                              auto result = fileResult (ok);
+
+                              if (ok)
+                                  result.getDynamicObject()->setProperty ("content", file.loadFileAsString());
+
+                              complete (result);
+                          });
+}
+
+void DM5AudioProcessorEditor::midiReceived (const MidiEngine::Bytes& bytes)
+{
+    juce::Array<juce::var> data;
+    data.ensureStorageAllocated ((int) bytes.size());
+
+    for (auto b : bytes)
+        data.add ((int) b);
+
+    browser.emitEventIfBrowserIsVisible ("midi", data);
+}
+
+void DM5AudioProcessorEditor::sendProgress (int jobId, int index, int total, bool done)
+{
+    juce::DynamicObject::Ptr o { new juce::DynamicObject() };
+    o->setProperty ("jobId", jobId);
+    o->setProperty ("index", index);
+    o->setProperty ("total", total);
+    o->setProperty ("done", done);
+    browser.emitEventIfBrowserIsVisible ("sendProgress", o.get());
 }

@@ -2,28 +2,29 @@
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 
-class DM5AudioProcessorEditor : public juce::AudioProcessorEditor
+class DM5AudioProcessorEditor : public juce::AudioProcessorEditor,
+                                private MidiEngine::Listener
 {
 public:
     explicit DM5AudioProcessorEditor (DM5AudioProcessor&);
     ~DM5AudioProcessorEditor() override;
 
-    void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
-    void refreshDeviceLists();
-    void openSelectedPorts();
-    void appendLog (const juce::String& msg);
+    using Completion = juce::WebBrowserComponent::NativeFunctionCompletion;
 
-    DM5AudioProcessor& audioProcessor;
+    void midiReceived (const MidiEngine::Bytes& bytes) override;
+    void sendProgress (int jobId, int index, int total, bool done) override;
 
-    juce::Label     inLabel  { {}, "MIDI In:" };
-    juce::Label     outLabel { {}, "MIDI Out:" };
-    juce::ComboBox  inCombo, outCombo;
-    juce::TextButton refreshBtn { "Refresh" };
-    juce::TextButton requestBtn { "Request Kit 0" };
-    juce::TextEditor logBox;
+    juce::WebBrowserComponent::Options makeOptions();
+    void saveFile (const juce::Array<juce::var>& args, Completion complete);
+    void openFile (Completion complete);
+
+    MidiEngine& engine;
+    juce::WebBrowserComponent browser;
+    juce::MidiDeviceListConnection deviceListConnection;
+    std::unique_ptr<juce::FileChooser> chooser;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DM5AudioProcessorEditor)
 };

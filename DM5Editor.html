@@ -521,13 +521,18 @@ function createWebMidiTransport() {
 
 function createJuceTransport() {
   const backend = window.__JUCE__.backend;
-  const pending = new Map();
-  let nextId = 0, progressCb = null;
+  const pending = new Map(), jobs = new Map();
+  let nextId = 0, nextJobId = 0;
   backend.addEventListener('__juce__complete', ({ promiseId, result }) => {
     const resolve = pending.get(promiseId);
     if (resolve) { pending.delete(promiseId); resolve(result); }
   });
-  backend.addEventListener('sendProgress', ({ index, total }) => { if (progressCb) progressCb(index, total); });
+  backend.addEventListener('sendProgress', ({ jobId, index, total, done }) => {
+    const job = jobs.get(jobId);
+    if (!job) return;
+    if (done) { jobs.delete(jobId); job.resolve(true); }
+    else if (job.onProgress) job.onProgress(index, total);
+  });
   const call = (name, ...params) => new Promise((resolve) => {
     const resultId = nextId++;
     pending.set(resultId, resolve);
@@ -540,7 +545,13 @@ function createJuceTransport() {
     send(bytes) { call('send', Array.from(bytes)); },
     onMessage(cb) { backend.addEventListener('midi', (bytes) => cb(bytes)); },
     onPortsChanged(cb) { backend.addEventListener('portsChanged', cb); },
-    sendPaced(messages, gapMs, onProgress) { progressCb = onProgress; return call('sendPaced', messages, gapMs); },
+    sendPaced(messages, gapMs, onProgress) {
+      return new Promise((resolve) => {
+        const jobId = nextJobId++;
+        jobs.set(jobId, { onProgress, resolve });
+        call('sendPaced', jobId, messages, gapMs);
+      });
+    },
     saveFile: (opts) => call('saveFile', opts),
     openFile: () => call('openFile'),
     getState: () => call('getState'),
