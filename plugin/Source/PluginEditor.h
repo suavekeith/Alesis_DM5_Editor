@@ -9,6 +9,7 @@ public:
     explicit DM5AudioProcessorEditor (DM5AudioProcessor&);
     ~DM5AudioProcessorEditor() override;
 
+    void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
@@ -21,6 +22,7 @@ private:
     void saveFile (const juce::Array<juce::var>& args, Completion complete);
     void openFile (Completion complete);
 
+    DM5AudioProcessor& dm5Processor;
     MidiEngine& engine;
     juce::WebBrowserComponent browser;
     juce::MidiDeviceListConnection deviceListConnection;

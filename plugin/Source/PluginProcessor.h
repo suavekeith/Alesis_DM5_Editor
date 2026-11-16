@@ -36,6 +36,8 @@ public:
 
     MidiEngine& getMidiEngine() { return midiEngine; }
 
+    juce::Point<int> editorSize;
+
 private:
     MidiEngine midiEngine;
 

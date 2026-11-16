@@ -759,7 +759,8 @@ function App() {
   };
 
   const sendKitData = (k, idx) => {
-    if (!outOpenRef.current || !k) return;
+    if (!k) return;
+    if (!outOpenRef.current) {addLog('No MIDI output.', 'err');return;}
     const data = buildKitSysEx(k, idx);
     if (data.length !== 343) {addLog(`Build error: ${data.length}b`, 'err');return;}
     transport.send(data);

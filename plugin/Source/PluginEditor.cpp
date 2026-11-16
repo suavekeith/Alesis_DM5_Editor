@@ -2,6 +2,8 @@
 
 namespace
 {
+constexpr int resizeStripHeight = 16;
+
 MidiEngine::Bytes toBytes (const juce::var& v)
 {
     MidiEngine::Bytes bytes;
@@ -80,14 +82,28 @@ std::optional<juce::WebBrowserComponent::Resource> webResource (const juce::Stri
 
 DM5AudioProcessorEditor::DM5AudioProcessorEditor (DM5AudioProcessor& p)
     : AudioProcessorEditor (&p),
+      dm5Processor (p),
       engine (p.getMidiEngine()),
       browser (makeOptions())
 {
     addAndMakeVisible (browser);
 
     setResizable (true, true);
-    setResizeLimits (900, 700, 3840, 2160);
-    setSize (1280, 960);
+    setResizeLimits (900, 500, 3840, 2160);
+
+    auto size = dm5Processor.editorSize;
+
+    if (size.isOrigin())
+    {
+        // Leave room for the host's plugin window header so the whole UI fits on screen.
+        size = { 1280, 960 };
+
+        if (auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+            size = { juce::jmin (size.x, display->userBounds.getWidth() - 40),
+                     juce::jmin (size.y, display->userBounds.getHeight() - 140) };
+    }
+
+    setSize (size.x, size.y);
 
     engine.addListener (this);
 
@@ -104,9 +120,16 @@ DM5AudioProcessorEditor::~DM5AudioProcessorEditor()
     engine.removeListener (this);
 }
 
+void DM5AudioProcessorEditor::paint (juce::Graphics& g)
+{
+    g.fillAll (juce::Colour (0xff0c0908));
+}
+
 void DM5AudioProcessorEditor::resized()
 {
-    browser.setBounds (getLocalBounds());
+    // The native web view would cover the resize corner, so keep a strip clear for it.
+    browser.setBounds (getLocalBounds().withTrimmedBottom (resizeStripHeight));
+    dm5Processor.editorSize = { getWidth(), getHeight() };
 }
 
 juce::WebBrowserComponent::Options DM5AudioProcessorEditor::makeOptions()
