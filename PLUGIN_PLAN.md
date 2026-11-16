@@ -132,10 +132,29 @@ whatever fails before starting Phase 5:
 - *README:* add a "Logic plugin" section (build steps, MIDI FX slot, ON OPEN option,
   JUCE licence note), and note that `npm start` now runs a build step.
 
-**3. Run the full test checklist** at the end of this file with the user.
+**3. Bring two plugin features to the Electron app.** the user asked for both.
 
-**Done when** every checklist item has been confirmed by the user in Logic, and the README
-describes the plugin.
+- *Remember state between launches.* The Electron app starts empty every time. Save the
+  same state the plugin saves (kit library, trigger setup, ports, MIDI channel, active
+  kit, checkboxes) and restore it on launch. Implement `getState` / `setState` in
+  `WebMidiTransport` (they are no-ops today), backed by a JSON file in
+  `app.getPath('userData')` through new IPC handlers in `main.js` and `preload.js`.
+  Then let the existing `applyState` call and state-push effect in `DM5Editor.html` run
+  for both transports instead of only when `transport.kind === 'juce'`. Web MIDI port ids
+  can change between launches, so store port names too and match by name when the id is
+  gone, as the plugin does. The ON OPEN dropdown stays plugin-only.
+- *Automatic MIDI init.* `main.js` already grants MIDI and SysEx permission without a
+  prompt, so call `initMIDI` on launch in Electron as the plugin does. Keep the INIT MIDI
+  button as a manual rescan.
+
+Done when the user confirms: quit and relaunch the app, and the kits, ports and settings
+are back without clicking INIT MIDI; with the MIDI interface unplugged, the app still
+launches and the log names the missing port.
+
+**4. Run the full test checklist** at the end of this file with the user.
+
+**Done when** every checklist item has been confirmed by the user, and the README describes
+the plugin.
 
 ### Open questions for the user (don't decide these alone)
 
@@ -350,3 +369,4 @@ setup without the plugin window being opened.
 - [ ] Save/reopen project restores the library; optional send-on-load works with window closed
 - [ ] Works with Wi-Fi off
 - [ ] Electron app still works after the shared-UI changes
+- [ ] Electron app restores kits, ports and settings after quit and relaunch
