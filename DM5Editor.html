@@ -522,7 +522,7 @@ function createWebMidiTransport() {
 function createJuceTransport() {
   const backend = window.__JUCE__.backend;
   const pending = new Map(), jobs = new Map();
-  let nextId = 0, nextJobId = 0;
+  let nextId = 0;
   backend.addEventListener('__juce__complete', ({ promiseId, result }) => {
     const resolve = pending.get(promiseId);
     if (resolve) { pending.delete(promiseId); resolve(result); }
@@ -547,7 +547,8 @@ function createJuceTransport() {
     onPortsChanged(cb) { backend.addEventListener('portsChanged', cb); },
     sendPaced(messages, gapMs, onProgress) {
       return new Promise((resolve) => {
-        const jobId = nextJobId++;
+        // Random so a reopened window never reuses the id of a transfer still running in the plugin
+        const jobId = Math.floor(Math.random() * 0x7fffffff);
         jobs.set(jobId, { onProgress, resolve });
         call('sendPaced', jobId, messages, gapMs);
       });
@@ -676,7 +677,10 @@ function App() {
   // Stable ref so the transport always dispatches to the latest handleMIDI
   const handleMIDIRef = useRef(null);
   useEffect(() => { handleMIDIRef.current = handleMIDI; }, [handleMIDI]);
-  useEffect(() => { transport.onMessage((bytes) => handleMIDIRef.current?.(bytes)); }, []);
+  useEffect(() => {
+    transport.onMessage((bytes) => handleMIDIRef.current?.(bytes));
+    transport.onPortsChanged((p) => {setInputPorts(p.inputs);setOutputPorts(p.outputs);});
+  }, []);
 
   const openPorts = useCallback(async (inId, outId) => {
     const r = await transport.openPorts(inId, outId);
@@ -696,7 +700,6 @@ function App() {
   const initMIDI = async () => {
     try {
       populatePorts(await transport.listPorts());
-      transport.onPortsChanged(populatePorts);
       setMidiStatus({ ok: false, warn: true, text: 'SELECT PORTS' });
       addLog('MIDI ready — select ports.', 'info');
     } catch (e) {
