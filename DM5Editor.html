@@ -705,6 +705,9 @@ function App() {
     }
   };
 
+  // In the plugin context there's no Web MIDI permission dialog — init automatically.
+  useEffect(() => { if (transport.kind === 'juce') initMIDI(); }, []);
+
   const handleInChange = (id) => {
     setSelectedInId(id);
     openPorts(id, selectedOutId);
@@ -814,6 +817,11 @@ function App() {
     const p = kitRef.current.pads[i];
     setEv({ ...p });
     pushNRPN(p);
+    if (outOpenRef.current) {
+      const note = ((kitRef.current.rootNote || 36) + i) & 0x7F;
+      transport.send([0x99, note, 100]);
+      setTimeout(() => transport.send([0x89, note, 0]), 200);
+    }
   };
 
   const updateEv = (key, val) => {
