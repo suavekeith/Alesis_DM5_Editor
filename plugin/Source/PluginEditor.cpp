@@ -99,8 +99,8 @@ DM5AudioProcessorEditor::DM5AudioProcessorEditor (DM5AudioProcessor& p)
         size = { 1280, 960 };
 
         if (auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
-            size = { juce::jmin (size.x, display->userBounds.getWidth() - 40),
-                     juce::jmin (size.y, display->userBounds.getHeight() - 140) };
+            size = { juce::jmin (size.x, juce::roundToInt (display->userBounds.getWidth()) - 40),
+                     juce::jmin (size.y, juce::roundToInt (display->userBounds.getHeight()) - 140) };
     }
 
     setSize (size.x, size.y);
