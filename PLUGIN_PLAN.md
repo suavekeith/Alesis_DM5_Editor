@@ -1,16 +1,173 @@
 # DM5 Editor → Logic Pro Audio Unit: build plan
 
-Hand this file to Claude Code in this folder. Work through the phases in order and
-don't start a phase until the previous one's "done when" check passes.
+Hand this file to Claude Code in this folder. Phases 0 to 4 are built; start with
+"Handoff: where things stand" below, then do the remaining work in the order given there.
+The original phase descriptions further down are kept for reference.
+
+## Handoff: where things stand
+
+### Status
+
+| Phase | State |
+|---|---|
+| 0 Toolchain, empty plugin | Done, tested in Logic |
+| 1 MIDI path ("hello DM5") | Done, tested in Logic with the DM5 |
+| 2 Offline web UI + transport layer | Done, Electron app tested with the DM5 |
+| 3 Web UI inside the plugin | Done, tested in Logic (Send Kit and window size were fixed afterwards and confirmed) |
+| 4 Save/recall with the project | Built and committed. **Not yet tested in Logic.** |
+| MIDI FX switch (not in the original plan) | Built and committed. **Not yet tested in Logic.** |
+| 5 Polish | Not started |
+
+### How this project is worked on
+
+- The user tests in Logic with the real DM5 and reports back. You cannot see Logic, the
+  plugin window or the DM5, and `screencapture` is not permitted on this machine. Never
+  report something as working in Logic unless the user has said so. Say what you verified
+  (build, `auval`, browser test) and what still needs his test.
+- One commit per phase or fix, made after the build and `auval` pass. Build before you
+  commit; a broken build was committed once by committing in the same command as the build.
+- The user is not a C++ developer. Explain results in plain terms, and give them exact steps
+  to test, including what the activity log should say.
+- Don't touch the untracked `octachron/` folder or `*.octachron` file in the repo root.
+  They belong to the user and are unrelated.
+
+### Build and verify
+
+Xcode.app is not installed (Command Line Tools only), so the Xcode generator does not
+work. Use Ninja. CMake and Ninja are in `/opt/homebrew/bin`; Node is in `~/.local/bin`.
+
+```bash
+cd plugin
+/opt/homebrew/bin/cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+/opt/homebrew/bin/cmake --build build --config Release
+auval -v aumi Dm5e Kwln
+```
+
+- The build runs `plugin/scripts/build-webui.sh` itself whenever `DM5Editor.html` changes,
+  embeds the result in the plugin, and installs the component to
+  `~/Library/Audio/Plug-Ins/Components/`.
+- After changing the AU type or IDs: `killall -9 AudioComponentRegistrar`, and the user must
+  rescan or restart Logic.
+- Electron app: `npm start` (builds the web UI first, then launches).
+- To test UI logic without Logic: serve `plugin/WebUI/` (a `webui` config exists in
+  `.claude/launch.json`) and load `index.html`. For the plugin code path, load the page in
+  an iframe with a fake `window.__JUCE__.backend` injected before the page scripts; it needs
+  `addEventListener` and `emitEvent`, and must answer `__juce__invoke` events with a
+  `__juce__complete` event carrying `{ promiseId, result }`. For the Electron path, replace
+  `navigator.requestMIDIAccess` with a fake before clicking INIT MIDI.
+
+### What was built differently from the original plan
+
+- **Plugin type is MIDI FX** (`aumi`), not an audio effect. It goes in the MIDI FX slot
+  above the External Instrument. It has no audio buses and passes the track's MIDI through
+  untouched. Everything below that says "audio effect", "stereo pass-through", "Audio FX"
+  or `aufx` is out of date.
+- **`DM5Editor.html` is a build source, not a runnable page.** It references `vendor/`
+  files that only exist in the build output and contains JSX that esbuild compiles.
+  Both Electron and the plugin load `plugin/WebUI/index.html`. There is no committed
+  `vendor/` folder; React and the fonts are npm dev dependencies copied in by the build.
+- **Paced sends use job ids.** JS picks a random job id and passes it to `sendPaced`;
+  C++ reports `sendProgress` events as `{ jobId, index, total, done }`. Sends started by
+  C++ itself (the on-open send) use job id `-1`, which the UI currently ignores.
+- **Send Kit also writes the DM5 edit buffer.** A slot dump (opcode `0x20 + kit`) is
+  stored but does not change what the module plays. When the PC checkbox is on and the
+  kit sent is the active kit, the same data is sent again with opcode `0x01`. The on-open
+  send does the same for the active kit, then sends Program Change.
+- **State ownership.** The processor holds the saved state as raw dumps. The UI reads it
+  with `getState` when the window opens and pushes the whole state back with `setState`
+  (debounced 200 ms) on any change. The processor also stores valid dumps arriving from
+  the DM5 itself, so kits received with the window closed are kept. Ports are recorded by
+  the `openPorts` native call only when its third argument (`remember`) is true; the UI
+  passes false when it is just reconnecting on restore, so a missing interface doesn't
+  erase the saved port.
+- **Plugin opens its ports list automatically**; INIT MIDI is only needed in Electron.
+  Clicking a pad plays it (added in a forked session).
+- **Window:** opens at a size capped to the display, minimum 900x500, with a 16 px strip
+  under the web view because the native web view would otherwise cover the resize corner.
+- **ON OPEN option** is a dropdown in the toolbar (plugin only): DON'T SEND, SEND ALL
+  KITS, SEND ACTIVE KIT.
+
+### Where things are
+
+- `DM5Editor.html`: the shared UI. The transport layer (`createWebMidiTransport`,
+  `createJuceTransport`) is in the plain script block before the JSX block. State restore
+  is `applyState`; the state push is the effect right after it.
+- `plugin/Source/MidiEngine.*`: ports, paced send thread, delivery of incoming SysEx and
+  progress to listeners on the message thread.
+- `plugin/Source/PluginProcessor.*`: saved state, JSON save/load, on-open send.
+- `plugin/Source/PluginEditor.*`: web view, embedded resources, native functions.
+- DM5 MIDI spec: removed from the repo but still in history. Extract it with
+  `git show 6f331f3:d4d5midm.pdf > spec.pdf` (text extraction works with `pypdf`).
+  Check it before changing anything about SysEx opcodes, NRPNs or Program Change.
+
+### Remaining work, in order
+
+**1. Get Phase 4 and the MIDI FX switch tested.** Ask the user to run these in Logic and fix
+whatever fails before starting Phase 5:
+
+- Insert DM5 Editor in the MIDI FX slot; the DM5 still plays from the track.
+- REQ ALL, edit a kit, APPLY, close and reopen the plugin window: library, ports, channel
+  and checkboxes are all still there.
+- ON OPEN = SEND ACTIVE KIT, save the project, change kit on the DM5 or power-cycle it,
+  reopen the project without opening the plugin window: the DM5 returns to the saved kit.
+- Same with SEND ALL KITS (about 9 seconds for 21 kits).
+- Unplug the MIDI interface, open the project: Logic doesn't hang, and the log reports the
+  missing port when the window is opened.
+
+**2. Phase 5 polish.**
+
+- *Status line.* The header already shows port status. Add a "sending" state, including
+  for the on-open send that C++ starts (job id `-1`), so opening the window during it
+  shows a transfer in progress.
+- *Log messages from C++.* There is no channel for the processor to write to the activity
+  log. Add one (an event to the web view, plus a short backlog for messages raised while
+  the window is closed), and use it for the on-open send ("sent 21 kits on project open",
+  "saved output not found, nothing sent").
+- *Multiple instances.* Allow them, but warn in the log when another instance already has
+  the same MIDI output open. A process-wide registry of open output ids in `MidiEngine`
+  is enough if Logic hosts the instances in one process; say so in the notes if that
+  can't be confirmed.
+- *Version string* in the UI, from `JucePlugin_VersionString` in the plugin and
+  `package.json` in Electron.
+- *README:* add a "Logic plugin" section (build steps, MIDI FX slot, ON OPEN option,
+  JUCE licence note), and note that `npm start` now runs a build step.
+
+**3. Run the full test checklist** at the end of this file with the user.
+
+**Done when** every checklist item has been confirmed by the user in Logic, and the README
+describes the plugin.
+
+### Open questions for the user (don't decide these alone)
+
+- Pad preview note on/off is fixed to channel 10 (`0x99` / `0x89`); only NRPN and Program
+  Change follow the channel selector. The plan specified this, but it may not be what he
+  wants.
+- The on-open send covers kits only, not the trigger setup.
+- The forked session's summary said selecting a *sound* previews it, but the code plays a
+  note only when a *pad* is clicked. Changing the sound dropdown does not play anything.
+- The theme and pad-size "tweaks" panel can't be opened in the app or the plugin (it only
+  responds to messages from a design tool), so those settings are saved but not changeable.
+
+### Known oddities
+
+- The DM5 replies to every SysEx it receives with `F0 00 00 0E 13 7F F7`. It isn't in the
+  spec and appears harmless; it shows in the log as an unknown 7-byte SysEx.
+- The plugin takes keyboard focus so kit names can be typed. If the user reports Logic key
+  commands not working while the plugin window is focused, that is why
+  (`EDITOR_WANTS_KEYBOARD_FOCUS` in `plugin/CMakeLists.txt`).
+- Changing a port selection while a transfer is running reopens only the port that
+  changed, but messages sent while the output is closed are dropped silently and the
+  progress bar continues.
+- The plugin is built for arm64 only, which is fine for this Mac.
 
 ## Goal
 
 A macOS Audio Unit that opens inside Logic Pro and does everything the Electron
 DM5 Editor does, and also saves the kit library in the Logic project.
 
-- **Plugin type:** audio effect (stereo pass-through). It goes on the same channel
-  strip as Logic's External Instrument plugin that plays the DM5. It ignores the
-  audio and acts as the DM5 editor panel.
+- **Plugin type:** MIDI FX (changed from the audio effect originally planned; see the
+  handoff section). It goes in the MIDI FX slot above Logic's External Instrument plugin
+  that plays the DM5, passes MIDI through, and acts as the DM5 editor panel.
 - **MIDI:** the plugin opens the DM5's CoreMIDI ports itself (JUCE `MidiInput` /
   `MidiOutput`). It does NOT route MIDI through Logic, because Logic can't be relied
   on to pass SysEx from a plugin to hardware. CoreMIDI lets Logic and the plugin share
@@ -185,7 +342,7 @@ setup without the plugin window being opened.
 ## Test checklist (run inside Logic each phase)
 
 - [ ] Plugin loads; `auval` passes
-- [ ] Audio passes through unchanged (bypass A/B)
+- [ ] The track's MIDI passes through unchanged (the DM5 plays with the plugin inserted)
 - [ ] Logic playback of the DM5 is unaffected while the plugin is open and while it sends
 - [ ] REQ ALL receives all 21 kits with valid checksums
 - [ ] SEND ALL completes; the DM5 shows the new data
