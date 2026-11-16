@@ -763,8 +763,17 @@ function App() {
     if (!outOpenRef.current) {addLog('No MIDI output.', 'err');return;}
     const data = buildKitSysEx(k, idx);
     if (data.length !== 343) {addLog(`Build error: ${data.length}b`, 'err');return;}
-    transport.send(data);
-    addLog(`Sent kit ${idx}: "${k.name.trim()}"`, 'ok');
+    // A slot dump doesn't touch the DM5's edit buffer (what it plays), so when the module
+    // is following the editor's kit selection, send the same data to the edit buffer too.
+    if (autoPC && idx === activeKitIdx) {
+      const editBuffer = [...data];
+      editBuffer[6] = 0x01;
+      transport.sendPaced([data, editBuffer], 400);
+      addLog(`Sent kit ${idx}: "${k.name.trim()}" (stored + edit buffer)`, 'ok');
+    } else {
+      transport.send(data);
+      addLog(`Sent kit ${idx}: "${k.name.trim()}" (stored)`, 'ok');
+    }
   };
 
   const sendKit = () => {
