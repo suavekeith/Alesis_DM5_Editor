@@ -9,33 +9,32 @@ MidiEngine::~MidiEngine()
     cancelPendingUpdate();
 }
 
+// Only reopens a port whose id changed, so reselecting ports doesn't interrupt a transfer.
 MidiEngine::OpenResult MidiEngine::openPorts (const juce::String& inId, const juce::String& outId)
 {
-    closePorts();
-
-    OpenResult result;
-
-    if (outId.isNotEmpty())
+    if (outId != openOutId || (outId.isNotEmpty() && midiOut == nullptr))
     {
-        if (auto out = juce::MidiOutput::openDevice (outId))
-        {
-            result.outName = out->getName();
-            const juce::ScopedLock sl (outLock);
-            midiOut = std::move (out);
-        }
+        auto out = outId.isNotEmpty() ? juce::MidiOutput::openDevice (outId) : nullptr;
+
+        const juce::ScopedLock sl (outLock);
+        midiOut = std::move (out);
+        openOutId = outId;
     }
 
-    if (inId.isNotEmpty())
+    if (inId != openInId || (inId.isNotEmpty() && midiIn == nullptr))
     {
-        if (auto in = juce::MidiInput::openDevice (inId, this))
-        {
-            result.inName = in->getName();
-            midiIn = std::move (in);
+        if (midiIn != nullptr)
+            midiIn->stop();
+
+        midiIn = inId.isNotEmpty() ? juce::MidiInput::openDevice (inId, this) : nullptr;
+        openInId = inId;
+
+        if (midiIn != nullptr)
             midiIn->start();
-        }
     }
 
-    return result;
+    return { midiIn  != nullptr ? midiIn->getName()  : juce::String(),
+             midiOut != nullptr ? midiOut->getName() : juce::String() };
 }
 
 void MidiEngine::closePorts()
@@ -48,6 +47,8 @@ void MidiEngine::closePorts()
 
     const juce::ScopedLock sl (outLock);
     midiOut.reset();
+    openInId.clear();
+    openOutId.clear();
 }
 
 void MidiEngine::send (const Bytes& bytes)

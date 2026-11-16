@@ -2,7 +2,9 @@
 #include <JuceHeader.h>
 #include "MidiEngine.h"
 
-class DM5AudioProcessor : public juce::AudioProcessor
+class DM5AudioProcessor : public juce::AudioProcessor,
+                          private MidiEngine::Listener,
+                          private juce::AsyncUpdater
 {
 public:
     DM5AudioProcessor();
@@ -36,10 +38,39 @@ public:
 
     MidiEngine& getMidiEngine() { return midiEngine; }
 
+    // Message thread only. The UI's view of the saved state; port ids are resolved to current devices.
+    juce::var getStateForUi();
+    void setStateFromUi (const juce::var& uiState);
+    MidiEngine::OpenResult openPorts (const juce::String& inId, const juce::String& outId, bool remember);
+
+    std::function<void()> onStateRestored;
     juce::Point<int> editorSize;
 
+    static constexpr int numKits = 21;
+
+    struct State
+    {
+        std::array<MidiEngine::Bytes, numKits> kits;
+        MidiEngine::Bytes trigSetup;
+        juce::String inId, inName, outId, outName;
+        int midiCh = 9;
+        int activeKit = -1;
+        juce::String sendOnLoad { "off" };
+        juce::var ui;
+    };
+
 private:
+    void midiReceived (const MidiEngine::Bytes& bytes) override;
+    void sendProgress (int, int, int, bool) override {}
+    void handleAsyncUpdate() override;
+
+    State copyState() const;
+    void sendStoredKits();
+
     MidiEngine midiEngine;
+
+    State state;
+    juce::CriticalSection stateLock;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DM5AudioProcessor)
 };

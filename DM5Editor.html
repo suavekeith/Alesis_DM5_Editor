@@ -485,6 +485,7 @@ function createWebMidiTransport() {
     send(bytes) { if (out) out.send(bytes); },
     onMessage(cb) { msgCb = cb; },
     onPortsChanged(cb) { portsCb = cb; },
+    onStateRestored() {},
     async sendPaced(messages, gapMs, onProgress) {
       for (let i = 0; i < messages.length; i++) {
         if (!out) return false;
@@ -541,10 +542,11 @@ function createJuceTransport() {
   return {
     kind: 'juce',
     listPorts: () => call('listPorts'),
-    openPorts: (inId, outId) => call('openPorts', inId, outId),
+    openPorts: (inId, outId, remember = true) => call('openPorts', inId, outId, remember),
     send(bytes) { call('send', Array.from(bytes)); },
     onMessage(cb) { backend.addEventListener('midi', (bytes) => cb(bytes)); },
     onPortsChanged(cb) { backend.addEventListener('portsChanged', cb); },
+    onStateRestored(cb) { backend.addEventListener('stateRestored', cb); },
     sendPaced(messages, gapMs, onProgress) {
       return new Promise((resolve) => {
         // Random so a reopened window never reuses the id of a transfer still running in the plugin
@@ -602,6 +604,10 @@ function App() {
   // program change on kit select
   const [autoPC, setAutoPC] = useState(true);
   const [midiCh, setMidiCh] = useState(9); // 0-indexed; 9 = ch 10 (DM5 default)
+
+  // plugin only: what to send to the DM5 when the host project opens ('off' | 'all' | 'active')
+  const [sendOnLoad, setSendOnLoad] = useState('off');
+  const hydratedRef = useRef(false);
 
   // screen navigation
   const [screen, setScreen] = useState('kits'); // 'kits' | 'triggers'
@@ -682,8 +688,8 @@ function App() {
     transport.onPortsChanged((p) => {setInputPorts(p.inputs);setOutputPorts(p.outputs);});
   }, []);
 
-  const openPorts = useCallback(async (inId, outId) => {
-    const r = await transport.openPorts(inId, outId);
+  const openPorts = useCallback(async (inId, outId, remember = true) => {
+    const r = await transport.openPorts(inId, outId, remember);
     outOpenRef.current = !!r.outName;
     const ok = !!(r.inName && r.outName);
     setMidiStatus({
@@ -708,8 +714,67 @@ function App() {
     }
   };
 
-  // In the plugin context there's no Web MIDI permission dialog — init automatically.
-  useEffect(() => { if (transport.kind === 'juce') initMIDI(); }, []);
+  // ── PLUGIN STATE (saved with the host project) ──
+  const applyState = (st) => {
+    if (!st) return;
+    const lib = Array.from({ length: 21 }, (_, i) => {
+      const raw = st.kits && st.kits[i];
+      return raw && raw.length === 343 ? decodeKit(raw) : null;
+    });
+    setLibrary(lib);libraryRef.current = lib;
+    if (st.trigSetup && st.trigSetup.length === 69) {
+      const decoded = decodeTrigSetup(st.trigSetup);
+      setTrigSetup(decoded);
+      setTs(JSON.parse(JSON.stringify(decoded)));
+    }
+    if (Number.isInteger(st.midiCh)) setMidiCh(st.midiCh);
+    setSendOnLoad(st.sendOnLoad || 'off');
+    const ui = st.ui || {};
+    if (ui.theme) setTheme(ui.theme);
+    if (ui.padSize) setPadSize(ui.padSize);
+    if (typeof ui.showLog === 'boolean') setShowLog(ui.showLog);
+    if (typeof ui.logOpen === 'boolean') setLogOpen(ui.logOpen);
+    if (typeof ui.autoPC === 'boolean') setAutoPC(ui.autoPC);
+    if (typeof ui.autoSend === 'boolean') setAutoSend(ui.autoSend);
+    const active = st.activeKit;
+    if (Number.isInteger(active) && active >= 0 && lib[active]) {
+      const copy = JSON.parse(JSON.stringify(lib[active]));
+      setKit(copy);kitRef.current = copy;
+      setActiveKitIdx(active);
+    } else {
+      setKit(null);kitRef.current = null;
+      setActiveKitIdx(null);
+    }
+    setSelectedPad(null);
+    setSelectedInId(st.inId || '');setSelectedOutId(st.outId || '');
+    if (st.inId || st.outId) openPorts(st.inId || '', st.outId || '', false);
+    if (st.inName && !st.inId) addLog(`Saved MIDI input "${st.inName}" not found.`, 'err');
+    if (st.outName && !st.outId) addLog(`Saved MIDI output "${st.outName}" not found.`, 'err');
+    const count = lib.filter(Boolean).length;
+    if (count) addLog(`Restored ${count} kits from the project.`, 'info');
+  };
+
+  // In the plugin there's no Web MIDI permission dialog: list ports and restore saved state on open.
+  useEffect(() => {
+    if (transport.kind !== 'juce') return;
+    (async () => {
+      await initMIDI();
+      applyState(await transport.getState());
+      hydratedRef.current = true;
+    })();
+    transport.onStateRestored(applyState);
+  }, []);
+
+  useEffect(() => {
+    if (transport.kind !== 'juce' || !hydratedRef.current) return;
+    const timer = setTimeout(() => transport.setState({
+      kits: library.map((k, i) => k ? buildKitSysEx(k, i) : null),
+      trigSetup: trigSetup ? buildTrigSetupSysEx(ts) : null,
+      midiCh, activeKit: activeKitIdx === null ? -1 : activeKitIdx, sendOnLoad,
+      ui: { theme, padSize, showLog, logOpen, autoPC, autoSend }
+    }), 200);
+    return () => clearTimeout(timer);
+  }, [library, trigSetup, ts, midiCh, activeKitIdx, sendOnLoad, theme, padSize, showLog, logOpen, autoPC, autoSend]);
 
   const handleInChange = (id) => {
     setSelectedInId(id);
@@ -1050,6 +1115,16 @@ function App() {
         <div className="tsep"></div>
         <button className="btn btn-sm" onClick={exportJSON}>EXPORT</button>
         <button className="btn btn-sm" onClick={importJSON}>IMPORT</button>
+        {transport.kind === 'juce' && <>
+          <div className="tsep"></div>
+          <span className="tlbl" title="What to send to the DM5 when the project opens">ON OPEN</span>
+          <select value={sendOnLoad} onChange={(e) => setSendOnLoad(e.target.value)}
+            title="Send the saved kits to the DM5 when the project opens, without opening this window">
+            <option value="off">DON'T SEND</option>
+            <option value="all">SEND ALL KITS</option>
+            <option value="active">SEND ACTIVE KIT</option>
+          </select>
+        </>}
       </div>
 
       {/* SCREEN TABS */}

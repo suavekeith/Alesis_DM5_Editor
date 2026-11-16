@@ -43,6 +43,7 @@ private:
 
     std::unique_ptr<juce::MidiInput>  midiIn;
     std::unique_ptr<juce::MidiOutput> midiOut;
+    juce::String openInId, openOutId;
     juce::CriticalSection outLock;
 
     std::deque<Job> jobs;

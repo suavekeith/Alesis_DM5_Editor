@@ -107,6 +107,11 @@ DM5AudioProcessorEditor::DM5AudioProcessorEditor (DM5AudioProcessor& p)
 
     engine.addListener (this);
 
+    dm5Processor.onStateRestored = [this]
+    {
+        browser.emitEventIfBrowserIsVisible ("stateRestored", dm5Processor.getStateForUi());
+    };
+
     deviceListConnection = juce::MidiDeviceListConnection::make ([this]
     {
         browser.emitEventIfBrowserIsVisible ("portsChanged", portList());
@@ -117,6 +122,7 @@ DM5AudioProcessorEditor::DM5AudioProcessorEditor (DM5AudioProcessor& p)
 
 DM5AudioProcessorEditor::~DM5AudioProcessorEditor()
 {
+    dm5Processor.onStateRestored = nullptr;
     engine.removeListener (this);
 }
 
@@ -145,7 +151,7 @@ juce::WebBrowserComponent::Options DM5AudioProcessorEditor::makeOptions()
         })
         .withNativeFunction ("openPorts", [this] (const Args& args, Completion complete)
         {
-            const auto opened = engine.openPorts (args[0].toString(), args[1].toString());
+            const auto opened = dm5Processor.openPorts (args[0].toString(), args[1].toString(), (bool) args[2]);
 
             juce::DynamicObject::Ptr o { new juce::DynamicObject() };
             o->setProperty ("inName",  nameOrNull (opened.inName));
@@ -176,12 +182,13 @@ juce::WebBrowserComponent::Options DM5AudioProcessorEditor::makeOptions()
         {
             openFile (std::move (complete));
         })
-        .withNativeFunction ("getState", [] (const Args&, Completion complete)
+        .withNativeFunction ("getState", [this] (const Args&, Completion complete)
         {
-            complete (juce::var());
+            complete (dm5Processor.getStateForUi());
         })
-        .withNativeFunction ("setState", [] (const Args&, Completion complete)
+        .withNativeFunction ("setState", [this] (const Args& args, Completion complete)
         {
+            dm5Processor.setStateFromUi (args[0]);
             complete (true);
         });
 }
