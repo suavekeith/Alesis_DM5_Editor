@@ -136,9 +136,7 @@ juce::String resolveDevice (const juce::Array<juce::MidiDeviceInfo>& devices, co
 }
 
 DM5AudioProcessor::DM5AudioProcessor()
-    : AudioProcessor (BusesProperties()
-                        .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
-                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
+    : AudioProcessor (BusesProperties())
 {
     midiEngine.addListener (this);
 }
@@ -152,18 +150,9 @@ DM5AudioProcessor::~DM5AudioProcessor()
 void DM5AudioProcessor::prepareToPlay (double, int) {}
 void DM5AudioProcessor::releaseResources() {}
 
-bool DM5AudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
-{
-    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
-        return false;
-    if (layouts.getMainInputChannelSet() != layouts.getMainOutputChannelSet())
-        return false;
-    return true;
-}
-
 void DM5AudioProcessor::processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&)
 {
-    // Audio passes through untouched; the plugin is only an editor panel.
+    // The track's MIDI passes through untouched; the plugin is only an editor panel.
 }
 
 juce::AudioProcessorEditor* DM5AudioProcessor::createEditor()
