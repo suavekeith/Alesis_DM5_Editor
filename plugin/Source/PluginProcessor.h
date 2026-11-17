@@ -41,7 +41,12 @@ public:
     void setStateFromUi (const juce::var& uiState);
     MidiEngine::OpenResult openPorts (const juce::String& inId, const juce::String& outId, bool remember);
 
+    // Messages for the activity log, queued so ones raised while the window is closed aren't lost.
+    void log (const juce::String& text, const juce::String& cls);
+    juce::var takeLog();
+
     std::function<void()> onStateRestored;
+    std::function<void()> onLogAdded;
     juce::Point<int> editorSize;
 
     static constexpr int numKits = 21;
@@ -59,7 +64,7 @@ public:
 
 private:
     void midiReceived (const MidiEngine::Bytes& bytes) override;
-    void sendProgress (int, int, int, bool) override {}
+    void sendProgress (int jobId, int index, int total, bool done) override;
     void handleAsyncUpdate() override;
 
     State copyState() const;
@@ -68,6 +73,7 @@ private:
     MidiEngine midiEngine;
 
     State state;
+    std::vector<std::pair<juce::String, juce::String>> pendingLog;
     juce::CriticalSection stateLock;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DM5AudioProcessor)

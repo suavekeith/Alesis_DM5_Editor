@@ -16,7 +16,8 @@ public:
         virtual void sendProgress (int jobId, int index, int total, bool done) = 0;
     };
 
-    struct OpenResult { juce::String inName, outName; };
+    // outputShared: another instance in this process also has the output open.
+    struct OpenResult { juce::String inName, outName; bool outputShared = false; };
 
     MidiEngine();
     ~MidiEngine() override;
@@ -40,10 +41,12 @@ private:
 
     void post (Event e);
     bool pause (int ms);
+    void registerOutput (const juce::String& outId);
+    bool outputIsShared() const;
 
     std::unique_ptr<juce::MidiInput>  midiIn;
     std::unique_ptr<juce::MidiOutput> midiOut;
-    juce::String openInId, openOutId;
+    juce::String openInId, openOutId, registeredOutId;
     juce::CriticalSection outLock;
 
     std::deque<Job> jobs;

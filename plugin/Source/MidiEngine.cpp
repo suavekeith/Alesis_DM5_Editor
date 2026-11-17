@@ -1,5 +1,21 @@
 #include "MidiEngine.h"
 
+namespace
+{
+// Open output ids across all plugin instances in this process.
+juce::CriticalSection& registryLock()
+{
+    static juce::CriticalSection lock;
+    return lock;
+}
+
+std::map<juce::String, int>& outputUsers()
+{
+    static std::map<juce::String, int> users;
+    return users;
+}
+}
+
 MidiEngine::MidiEngine() : juce::Thread ("DM5 paced send") {}
 
 MidiEngine::~MidiEngine()
@@ -15,6 +31,8 @@ MidiEngine::OpenResult MidiEngine::openPorts (const juce::String& inId, const ju
     if (outId != openOutId || (outId.isNotEmpty() && midiOut == nullptr))
     {
         auto out = outId.isNotEmpty() ? juce::MidiOutput::openDevice (outId) : nullptr;
+
+        registerOutput (out != nullptr ? outId : juce::String());
 
         const juce::ScopedLock sl (outLock);
         midiOut = std::move (out);
@@ -34,7 +52,29 @@ MidiEngine::OpenResult MidiEngine::openPorts (const juce::String& inId, const ju
     }
 
     return { midiIn  != nullptr ? midiIn->getName()  : juce::String(),
-             midiOut != nullptr ? midiOut->getName() : juce::String() };
+             midiOut != nullptr ? midiOut->getName() : juce::String(),
+             outputIsShared() };
+}
+
+void MidiEngine::registerOutput (const juce::String& outId)
+{
+    const juce::ScopedLock sl (registryLock());
+    auto& users = outputUsers();
+
+    if (registeredOutId.isNotEmpty() && --users[registeredOutId] <= 0)
+        users.erase (registeredOutId);
+
+    registeredOutId = outId;
+
+    if (outId.isNotEmpty())
+        ++users[outId];
+}
+
+bool MidiEngine::outputIsShared() const
+{
+    const juce::ScopedLock sl (registryLock());
+    const auto it = outputUsers().find (registeredOutId);
+    return it != outputUsers().end() && it->second > 1;
 }
 
 void MidiEngine::closePorts()
@@ -44,6 +84,8 @@ void MidiEngine::closePorts()
         midiIn->stop();
         midiIn.reset();
     }
+
+    registerOutput ({});
 
     const juce::ScopedLock sl (outLock);
     midiOut.reset();

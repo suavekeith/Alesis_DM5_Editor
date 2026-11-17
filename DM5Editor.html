@@ -458,6 +458,9 @@ const TRIG_NAMES=["Bass Drum","Snare","Hi Tom","Mid Tom","Low Tom","Floor Tom",
 
 <!-- MIDI / FILE TRANSPORT (Web MIDI in Electron, native bridge in the plugin) -->
 <script>
+// Replaced with the package.json version by build-webui.sh.
+const APP_VERSION = '__APP_VERSION__';
+
 function createWebMidiTransport() {
   let access = null, inp = null, out = null, msgCb = null, portsCb = null;
   const ports = () => {
@@ -468,6 +471,7 @@ function createWebMidiTransport() {
   };
   return {
     kind: 'webmidi',
+    version: APP_VERSION,
     async listPorts() {
       if (!access) {
         access = await navigator.requestMIDIAccess({ sysex: true });
@@ -486,6 +490,9 @@ function createWebMidiTransport() {
     onMessage(cb) { msgCb = cb; },
     onPortsChanged(cb) { portsCb = cb; },
     onStateRestored() {},
+    onLogAvailable() {},
+    onBackgroundSend() {},
+    async takeLog() { return []; },
     async sendPaced(messages, gapMs, onProgress) {
       for (let i = 0; i < messages.length; i++) {
         if (!out) return false;
@@ -528,9 +535,10 @@ function createJuceTransport() {
     const resolve = pending.get(promiseId);
     if (resolve) { pending.delete(promiseId); resolve(result); }
   });
+  let backgroundCb = null;
   backend.addEventListener('sendProgress', ({ jobId, index, total, done }) => {
     const job = jobs.get(jobId);
-    if (!job) return;
+    if (!job) { if (backgroundCb) backgroundCb({ index, total, done }); return; }
     if (done) { jobs.delete(jobId); job.resolve(true); }
     else if (job.onProgress) job.onProgress(index, total);
   });
@@ -541,12 +549,17 @@ function createJuceTransport() {
   });
   return {
     kind: 'juce',
+    version: (window.__JUCE__.initialisationData.pluginVersion || [])[0] || '',
     listPorts: () => call('listPorts'),
     openPorts: (inId, outId, remember = true) => call('openPorts', inId, outId, remember),
     send(bytes) { call('send', Array.from(bytes)); },
     onMessage(cb) { backend.addEventListener('midi', (bytes) => cb(bytes)); },
     onPortsChanged(cb) { backend.addEventListener('portsChanged', cb); },
     onStateRestored(cb) { backend.addEventListener('stateRestored', cb); },
+    onLogAvailable(cb) { backend.addEventListener('logAvailable', cb); },
+    // Progress for transfers the plugin started itself, such as the send when a project opens.
+    onBackgroundSend(cb) { backgroundCb = cb; },
+    takeLog: () => call('takeLog'),
     sendPaced(messages, gapMs, onProgress) {
       return new Promise((resolve) => {
         // Random so a reopened window never reuses the id of a transfer still running in the plugin
@@ -697,6 +710,8 @@ function App() {
       text: ok ? r.inName.substring(0, 24) : inId || outId ? 'PARTIAL' : 'NO PORTS'
     });
     if (ok) addLog(`Ports: in="${r.inName}" out="${r.outName}"`, 'info');
+    if (r.outputShared) addLog(`Another DM5 Editor instance also has "${r.outName}" open.`, 'err');
+    return r;
   }, [addLog]);
 
   const populatePorts = useCallback((p) => {
@@ -747,7 +762,10 @@ function App() {
     }
     setSelectedPad(null);
     setSelectedInId(st.inId || '');setSelectedOutId(st.outId || '');
-    if (st.inId || st.outId) openPorts(st.inId || '', st.outId || '', false);
+    const portMissing = (st.inName && !st.inId) || (st.outName && !st.outId);
+    const showMissing = () => { if (portMissing) setMidiStatus({ ok: false, warn: false, text: 'PORT NOT FOUND' }); };
+    if (st.inId || st.outId) openPorts(st.inId || '', st.outId || '', false).then(showMissing);
+    else showMissing();
     if (st.inName && !st.inId) addLog(`Saved MIDI input "${st.inName}" not found.`, 'err');
     if (st.outName && !st.outId) addLog(`Saved MIDI output "${st.outName}" not found.`, 'err');
     const count = lib.filter(Boolean).length;
@@ -757,12 +775,19 @@ function App() {
   // In the plugin there's no Web MIDI permission dialog: list ports and restore saved state on open.
   useEffect(() => {
     if (transport.kind !== 'juce') return;
+    const drainLog = async () => (await transport.takeLog()).forEach((e) => addLog(e.text, e.cls));
     (async () => {
       await initMIDI();
       applyState(await transport.getState());
       hydratedRef.current = true;
+      await drainLog();
     })();
     transport.onStateRestored(applyState);
+    transport.onLogAvailable(drainLog);
+    transport.onBackgroundSend(({ index, total, done }) => {
+      setIsSending(!done);
+      setSendProgress(done ? 0 : Math.round((index + 1) / total * 100));
+    });
   }, []);
 
   useEffect(() => {
@@ -1058,7 +1083,8 @@ function App() {
   const filteredPads = kit ? kit.pads.map((p, i) => ({ ...p, idx: i })).filter((p) => bankFilter < 0 || p.bank === bankFilter) : [];
 
   // ── RENDER ──
-  const ledClass = midiStatus.ok ? 'ok' : midiStatus.warn ? 'warn' : '';
+  const ledClass = isSending ? 'warn' : midiStatus.ok ? 'ok' : midiStatus.warn ? 'warn' : '';
+  const statusText = isSending ? `SENDING ${sendProgress}%` : midiStatus.text;
 
   return (
     <div className={`app t-${theme}${padSize === 'compact' ? ' t-compact' : ''}`}>
@@ -1067,7 +1093,7 @@ function App() {
       <header className="header">
         <div>
           <span className="hdr-logo">DM5</span>
-          <span className="hdr-sub">ALESIS DRUM EDITOR</span>
+          <span className="hdr-sub">ALESIS DRUM EDITOR{transport.version && ` · v${transport.version}`}</span>
         </div>
         <div className="hdr-sep"></div>
         <div className="lcd">
@@ -1089,7 +1115,7 @@ function App() {
         <div className="hdr-sep"></div>
         <div className="midi-status">
           <div className={`status-led ${ledClass}`}></div>
-          <div className="status-text">{midiStatus.text}</div>
+          <div className="status-text">{statusText}</div>
         </div>
       </header>
 

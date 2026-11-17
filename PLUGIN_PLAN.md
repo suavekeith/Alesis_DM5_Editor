@@ -14,9 +14,9 @@ The original phase descriptions further down are kept for reference.
 | 1 MIDI path ("hello DM5") | Done, tested in Logic with the DM5 |
 | 2 Offline web UI + transport layer | Done, Electron app tested with the DM5 |
 | 3 Web UI inside the plugin | Done, tested in Logic (Send Kit and window size were fixed afterwards and confirmed) |
-| 4 Save/recall with the project | Built and committed. **Not yet tested in Logic.** |
-| MIDI FX switch (not in the original plan) | Built and committed. **Not yet tested in Logic.** |
-| 5 Polish | Not started |
+| 4 Save/recall with the project | Done, tested in Logic with the DM5 |
+| MIDI FX switch (not in the original plan) | Done, tested in Logic |
+| 5 Polish | Built and committed. **Not yet tested in Logic.** |
 
 ### How this project is worked on
 
@@ -102,7 +102,7 @@ auval -v aumi Dm5e Kwln
 
 ### Remaining work, in order
 
-**1. Get Phase 4 and the MIDI FX switch tested.** Ask the user to run these in Logic and fix
+**1. ~~Get Phase 4 and the MIDI FX switch tested.~~** Done. Ask the user to run these in Logic and fix
 whatever fails before starting Phase 5:
 
 - Insert DM5 Editor in the MIDI FX slot; the DM5 still plays from the track.
@@ -114,7 +114,24 @@ whatever fails before starting Phase 5:
 - Unplug the MIDI interface, open the project: Logic doesn't hang, and the log reports the
   missing port when the window is opened.
 
-**2. Phase 5 polish.**
+**2. Phase 5 polish.** Built; waiting on the user's test. What was done:
+
+- Status light shows `SENDING n%` during any transfer, including the on-open send
+  (job id `-1`, delivered to the UI through `transport.onBackgroundSend`), and
+  `PORT NOT FOUND` when a saved port is missing.
+- C++ log channel: `DM5AudioProcessor::log()` queues messages; the UI drains them with the
+  `takeLog` native function on open and whenever a `logAvailable` event arrives. The
+  on-open send logs start, finish, "output not found" and "no saved kits".
+- Shared outputs: `MidiEngine` keeps a process-wide count of open output ids, and
+  `openPorts` returns `outputShared`. This only sees instances in the same process. It
+  hasn't been confirmed whether Logic hosts all instances in one process; if the user sees no
+  warning with two instances on the same output, that is why.
+- Version: plugin from `JucePlugin_VersionString` (via `withInitialisationData`), app from
+  `package.json` (substituted by `build-webui.sh`). Shown in the header subtitle. Keep the
+  version in `plugin/CMakeLists.txt` and `package.json` in step.
+- README has a "Logic plugin" section and the `npm start` build-step note.
+
+Original Phase 5 task list:
 
 - *Status line.* The header already shows port status. Add a "sending" state, including
   for the on-open send that C++ starts (job id `-1`), so opening the window during it

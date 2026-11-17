@@ -112,6 +112,11 @@ DM5AudioProcessorEditor::DM5AudioProcessorEditor (DM5AudioProcessor& p)
         browser.emitEventIfBrowserIsVisible ("stateRestored", dm5Processor.getStateForUi());
     };
 
+    dm5Processor.onLogAdded = [this]
+    {
+        browser.emitEventIfBrowserIsVisible ("logAvailable", juce::var());
+    };
+
     deviceListConnection = juce::MidiDeviceListConnection::make ([this]
     {
         browser.emitEventIfBrowserIsVisible ("portsChanged", portList());
@@ -123,6 +128,7 @@ DM5AudioProcessorEditor::DM5AudioProcessorEditor (DM5AudioProcessor& p)
 DM5AudioProcessorEditor::~DM5AudioProcessorEditor()
 {
     dm5Processor.onStateRestored = nullptr;
+    dm5Processor.onLogAdded = nullptr;
     engine.removeListener (this);
 }
 
@@ -144,6 +150,7 @@ juce::WebBrowserComponent::Options DM5AudioProcessorEditor::makeOptions()
 
     return juce::WebBrowserComponent::Options()
         .withNativeIntegrationEnabled()
+        .withInitialisationData ("pluginVersion", JucePlugin_VersionString)
         .withResourceProvider ([] (const juce::String& url) { return webResource (url); })
         .withNativeFunction ("listPorts", [] (const Args&, Completion complete)
         {
@@ -156,6 +163,7 @@ juce::WebBrowserComponent::Options DM5AudioProcessorEditor::makeOptions()
             juce::DynamicObject::Ptr o { new juce::DynamicObject() };
             o->setProperty ("inName",  nameOrNull (opened.inName));
             o->setProperty ("outName", nameOrNull (opened.outName));
+            o->setProperty ("outputShared", opened.outputShared);
             complete (o.get());
         })
         .withNativeFunction ("send", [this] (const Args& args, Completion complete)
@@ -181,6 +189,10 @@ juce::WebBrowserComponent::Options DM5AudioProcessorEditor::makeOptions()
         .withNativeFunction ("openFile", [this] (const Args&, Completion complete)
         {
             openFile (std::move (complete));
+        })
+        .withNativeFunction ("takeLog", [this] (const Args&, Completion complete)
+        {
+            complete (dm5Processor.takeLog());
         })
         .withNativeFunction ("getState", [this] (const Args&, Completion complete)
         {

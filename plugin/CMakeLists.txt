@@ -62,6 +62,7 @@ add_custom_command(
     OUTPUT ${WEBUI_FILES}
     COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build-webui.sh"
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../DM5Editor.html"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../package.json"
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build-webui.sh"
     COMMENT "Building web UI"
 )

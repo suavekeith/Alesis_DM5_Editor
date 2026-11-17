@@ -216,10 +216,16 @@ void DM5AudioProcessor::sendStoredKits()
     const auto outId = resolveDevice (juce::MidiOutput::getAvailableDevices(), s.outId, s.outName);
 
     if (outId.isEmpty())
+    {
+        log ("On open: saved MIDI output \"" + s.outName + "\" not found, nothing was sent.", "err");
         return;
+    }
 
     const auto inId = resolveDevice (juce::MidiInput::getAvailableDevices(), s.inId, s.inName);
-    midiEngine.openPorts (inId, outId);
+    const auto opened = midiEngine.openPorts (inId, outId);
+
+    if (opened.outputShared)
+        log ("Another DM5 Editor instance also has \"" + opened.outName + "\" open.", "err");
 
     std::vector<Bytes> messages;
     const Bytes* active = s.activeKit >= 0 && ! s.kits[(size_t) s.activeKit].empty() ? &s.kits[(size_t) s.activeKit] : nullptr;
@@ -236,7 +242,15 @@ void DM5AudioProcessor::sendStoredKits()
     }
 
     if (messages.empty())
+    {
+        log ("On open: no saved kits to send.", "info");
         return;
+    }
+
+    const auto kitCount = (int) messages.size();
+    log ("On open: sending " + juce::String (kitCount) + (kitCount == 1 ? " kit" : " kits")
+           + " to \"" + opened.outName + "\"" + (s.activeKit >= 0 ? " and selecting kit " + juce::String (s.activeKit) : juce::String())
+           + ".", "info");
 
     if (active != nullptr)
     {
@@ -289,6 +303,41 @@ MidiEngine::OpenResult DM5AudioProcessor::openPorts (const juce::String& inId, c
     }
 
     return opened;
+}
+
+void DM5AudioProcessor::sendProgress (int jobId, int, int, bool done)
+{
+    if (jobId == -1 && done)
+        log ("On open: finished sending to the DM5.", "ok");
+}
+
+void DM5AudioProcessor::log (const juce::String& text, const juce::String& cls)
+{
+    constexpr size_t maxPending = 100;
+
+    if (pendingLog.size() >= maxPending)
+        pendingLog.erase (pendingLog.begin());
+
+    pendingLog.emplace_back (text, cls);
+
+    if (onLogAdded)
+        onLogAdded();
+}
+
+juce::var DM5AudioProcessor::takeLog()
+{
+    juce::Array<juce::var> entries;
+
+    for (const auto& [text, cls] : pendingLog)
+    {
+        juce::DynamicObject::Ptr o { new juce::DynamicObject() };
+        o->setProperty ("text", text);
+        o->setProperty ("cls", cls);
+        entries.add (o.get());
+    }
+
+    pendingLog.clear();
+    return entries;
 }
 
 // Keeps dumps that arrive while the plugin window is closed.

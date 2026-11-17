@@ -13,7 +13,8 @@ const vendor = path.join(out, 'vendor');
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(path.join(vendor, 'fonts'), { recursive: true });
 
-const html = fs.readFileSync('DM5Editor.html', 'utf8');
+const version = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
+const html = fs.readFileSync('DM5Editor.html', 'utf8').replace('__APP_VERSION__', version);
 const open = '<script type="text/babel">';
 const start = html.indexOf(open);
 const end = html.indexOf('</script>', start);
