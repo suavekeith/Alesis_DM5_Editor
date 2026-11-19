@@ -278,7 +278,7 @@ DM5Editor/
     scripts/build-webui.sh
 ```
 
-Plugin IDs: manufacturer code `Kwln`, plugin code `Dm5e`, name "DM5 Editor",
+Plugin IDs: manufacturer code `Kwln` (kept so existing Logic projects still find the plugin), plugin code `Dm5e`, name "DM5 Editor",
 manufacturer "DM5 Editor" (originally a personal name), formats `AU` (add `Standalone` too; it's free and handy
 for testing).
 
