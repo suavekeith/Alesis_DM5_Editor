@@ -49,7 +49,11 @@ function createWindow() {
   Menu.setApplicationMenu(menu);
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  // Packaged builds get the icon from the app bundle; this covers `npm start`.
+  if (!app.isPackaged && app.dock) app.dock.setIcon(path.join(__dirname, 'assets', 'icon.png'));
+  createWindow();
+});
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

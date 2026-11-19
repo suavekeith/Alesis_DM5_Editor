@@ -25,7 +25,8 @@
             "arm64"
           ]
         }
-      ]
+      ],
+      "icon": "assets/icon.icns"
     },
     "files": [
       "main.js",
