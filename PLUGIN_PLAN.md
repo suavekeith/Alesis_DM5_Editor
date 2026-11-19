@@ -17,7 +17,8 @@ The original phase descriptions further down are kept for reference.
 | 4 Save/recall with the project | Done, tested in Logic with the DM5 |
 | MIDI FX switch (not in the original plan) | Done, tested in Logic |
 | 5 Polish | Done, tested in Logic (shared-output warning works, so Logic hosts all instances in one process) |
-| Electron: saved state + auto MIDI init | Built and committed. **Not yet tested by the user.** |
+| Electron: saved state + auto MIDI init | Done, tested by the user |
+| Final test checklist | Done, all items confirmed by the user (2026-11-19) |
 
 ### How this project is worked on
 
@@ -149,7 +150,7 @@ Original Phase 5 task list:
 - *README:* add a "Logic plugin" section (build steps, MIDI FX slot, ON OPEN option,
   JUCE licence note), and note that `npm start` now runs a build step.
 
-**3. Bring two plugin features to the Electron app.** Built; waiting on the user's test.
+**3. Bring two plugin features to the Electron app.** Done and tested.
 State is saved to `state.json` in Electron's `userData` folder via the `load-state` /
 `save-state` IPC handlers; `WebMidiTransport` tracks the user's port choice and resolves
 saved ports by id then name. The restore effect in `DM5Editor.html` now runs for both
@@ -172,7 +173,7 @@ Done when the user confirms: quit and relaunch the app, and the kits, ports and 
 are back without clicking INIT MIDI; with the MIDI interface unplugged, the app still
 launches and the log names the missing port.
 
-**4. Run the full test checklist** at the end of this file with the user.
+**4. ~~Run the full test checklist~~** Done; every item confirmed.
 
 **Done when** every checklist item has been confirmed by the user, and the README describes
 the plugin.
@@ -379,15 +380,15 @@ setup without the plugin window being opened.
 - Multiple instances: allow it, but warn in the log if another instance holds the same output.
 - Version string in the UI; update `README.md` with a "Logic plugin" section.
 
-## Test checklist (run inside Logic each phase)
+## Test checklist (run inside Logic each phase; all confirmed 2026-11-19)
 
-- [ ] Plugin loads; `auval` passes
-- [ ] The track's MIDI passes through unchanged (the DM5 plays with the plugin inserted)
-- [ ] Logic playback of the DM5 is unaffected while the plugin is open and while it sends
-- [ ] REQ ALL receives all 21 kits with valid checksums
-- [ ] SEND ALL completes; the DM5 shows the new data
-- [ ] Close/reopen window mid-transfer: transfer completes, no crash
-- [ ] Save/reopen project restores the library; optional send-on-load works with window closed
-- [ ] Works with Wi-Fi off
-- [ ] Electron app still works after the shared-UI changes
-- [ ] Electron app restores kits, ports and settings after quit and relaunch
+- [x] Plugin loads; `auval` passes
+- [x] The track's MIDI passes through unchanged (the DM5 plays with the plugin inserted)
+- [x] Logic playback of the DM5 is unaffected while the plugin is open and while it sends
+- [x] REQ ALL receives all 21 kits with valid checksums
+- [x] SEND ALL completes; the DM5 shows the new data
+- [x] Close/reopen window mid-transfer: transfer completes, no crash
+- [x] Save/reopen project restores the library; optional send-on-load works with window closed
+- [x] Works with Wi-Fi off
+- [x] Electron app still works after the shared-UI changes
+- [x] Electron app restores kits, ports and settings after quit and relaunch
