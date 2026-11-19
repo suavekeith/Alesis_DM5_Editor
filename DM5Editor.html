@@ -463,6 +463,16 @@ const APP_VERSION = '__APP_VERSION__';
 
 function createWebMidiTransport() {
   let access = null, inp = null, out = null, msgCb = null, portsCb = null;
+  // Last ports chosen by the user, saved with the rest of the state.
+  let savedPorts = { inId: '', inName: '', outId: '', outName: '' };
+  // Port ids can change between launches, so fall back to matching by name.
+  const resolvePort = (map, id, name) => {
+    if (!map) return '';
+    if (id && map.get(id)) return id;
+    let found = '';
+    if (name) map.forEach((p) => { if (!found && p.name === name) found = p.id; });
+    return found;
+  };
   const ports = () => {
     const inputs = [], outputs = [];
     access.inputs.forEach((p) => inputs.push({ id: p.id, name: p.name }));
@@ -479,11 +489,13 @@ function createWebMidiTransport() {
       }
       return ports();
     },
-    async openPorts(inId, outId) {
+    async openPorts(inId, outId, remember = true) {
       if (inp) inp.onmidimessage = null;
       inp = (access && inId && access.inputs.get(inId)) || null;
       out = (access && outId && access.outputs.get(outId)) || null;
       if (inp) inp.onmidimessage = (e) => { if (msgCb) msgCb(Array.from(e.data)); };
+      if (remember)
+        savedPorts = { inId: inId || '', inName: inp ? inp.name : '', outId: outId || '', outName: out ? out.name : '' };
       return { inName: inp ? inp.name : null, outName: out ? out.name : null };
     },
     send(bytes) { if (out) out.send(bytes); },
@@ -522,8 +534,18 @@ function createWebMidiTransport() {
         el.click();
       });
     },
-    async getState() { return null; },
-    async setState() {}
+    async getState() {
+      if (!window.electronAPI) return null;
+      const st = await window.electronAPI.loadState();
+      if (!st) return null;
+      savedPorts = { inId: st.inId || '', inName: st.inName || '', outId: st.outId || '', outName: st.outName || '' };
+      return { ...st,
+        inId: resolvePort(access && access.inputs, st.inId, st.inName),
+        outId: resolvePort(access && access.outputs, st.outId, st.outName) };
+    },
+    async setState(state) {
+      if (window.electronAPI) await window.electronAPI.saveState({ version: 1, ...state, ...savedPorts });
+    }
   };
 }
 
@@ -729,7 +751,7 @@ function App() {
     }
   };
 
-  // ── PLUGIN STATE (saved with the host project) ──
+  // ── SAVED STATE (plugin: in the host project; app: in the app's data folder) ──
   const applyState = (st) => {
     if (!st) return;
     const lib = Array.from({ length: 21 }, (_, i) => {
@@ -769,12 +791,12 @@ function App() {
     if (st.inName && !st.inId) addLog(`Saved MIDI input "${st.inName}" not found.`, 'err');
     if (st.outName && !st.outId) addLog(`Saved MIDI output "${st.outName}" not found.`, 'err');
     const count = lib.filter(Boolean).length;
-    if (count) addLog(`Restored ${count} kits from the project.`, 'info');
+    if (count) addLog(`Restored ${count} ${count === 1 ? 'kit' : 'kits'} from the ${transport.kind === 'juce' ? 'project' : 'last session'}.`, 'info');
   };
 
-  // In the plugin there's no Web MIDI permission dialog: list ports and restore saved state on open.
+  // MIDI permission is granted without a prompt in both the plugin and Electron, so list ports
+  // and restore the saved state straight away.
   useEffect(() => {
-    if (transport.kind !== 'juce') return;
     const drainLog = async () => (await transport.takeLog()).forEach((e) => addLog(e.text, e.cls));
     (async () => {
       await initMIDI();
@@ -791,7 +813,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (transport.kind !== 'juce' || !hydratedRef.current) return;
+    if (!hydratedRef.current) return;
     const timer = setTimeout(() => transport.setState({
       kits: library.map((k, i) => k ? buildKitSysEx(k, i) : null),
       trigSetup: trigSetup ? buildTrigSetupSysEx(ts) : null,

@@ -16,7 +16,8 @@ The original phase descriptions further down are kept for reference.
 | 3 Web UI inside the plugin | Done, tested in Logic (Send Kit and window size were fixed afterwards and confirmed) |
 | 4 Save/recall with the project | Done, tested in Logic with the DM5 |
 | MIDI FX switch (not in the original plan) | Done, tested in Logic |
-| 5 Polish | Built and committed. **Not yet tested in Logic.** |
+| 5 Polish | Done, tested in Logic (shared-output warning works, so Logic hosts all instances in one process) |
+| Electron: saved state + auto MIDI init | Built and committed. **Not yet tested by the user.** |
 
 ### How this project is worked on
 
@@ -114,7 +115,7 @@ whatever fails before starting Phase 5:
 - Unplug the MIDI interface, open the project: Logic doesn't hang, and the log reports the
   missing port when the window is opened.
 
-**2. Phase 5 polish.** Built; waiting on the user's test. What was done:
+**2. Phase 5 polish.** Done and tested. What was done:
 
 - Status light shows `SENDING n%` during any transfer, including the on-open send
   (job id `-1`, delivered to the UI through `transport.onBackgroundSend`), and
@@ -124,8 +125,7 @@ whatever fails before starting Phase 5:
   on-open send logs start, finish, "output not found" and "no saved kits".
 - Shared outputs: `MidiEngine` keeps a process-wide count of open output ids, and
   `openPorts` returns `outputShared`. This only sees instances in the same process. It
-  hasn't been confirmed whether Logic hosts all instances in one process; if the user sees no
-  warning with two instances on the same output, that is why.
+  The user confirmed the warning appears in Logic, so Logic hosts the instances in one process.
 - Version: plugin from `JucePlugin_VersionString` (via `withInitialisationData`), app from
   `package.json` (substituted by `build-webui.sh`). Shown in the header subtitle. Keep the
   version in `plugin/CMakeLists.txt` and `package.json` in step.
@@ -149,7 +149,11 @@ Original Phase 5 task list:
 - *README:* add a "Logic plugin" section (build steps, MIDI FX slot, ON OPEN option,
   JUCE licence note), and note that `npm start` now runs a build step.
 
-**3. Bring two plugin features to the Electron app.** the user asked for both.
+**3. Bring two plugin features to the Electron app.** Built; waiting on the user's test.
+State is saved to `state.json` in Electron's `userData` folder via the `load-state` /
+`save-state` IPC handlers; `WebMidiTransport` tracks the user's port choice and resolves
+saved ports by id then name. The restore effect in `DM5Editor.html` now runs for both
+transports. Original task:
 
 - *Remember state between launches.* The Electron app starts empty every time. Save the
   same state the plugin saves (kit library, trigger setup, ports, MIDI channel, active

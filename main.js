@@ -75,3 +75,21 @@ ipcMain.handle('open-file', async () => {
   const content = fs.readFileSync(filePaths[0], 'utf8');
   return { success: true, content };
 });
+
+// ── IPC: saved editor state (kits, ports, settings) ─────────
+const statePath = () => path.join(app.getPath('userData'), 'state.json');
+
+ipcMain.handle('load-state', () => {
+  try {
+    return JSON.parse(fs.readFileSync(statePath(), 'utf8'));
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle('save-state', (_e, state) => {
+  // Write then rename so a crash mid-write can't leave a truncated file.
+  const tmp = statePath() + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(state), 'utf8');
+  fs.renameSync(tmp, statePath());
+});
